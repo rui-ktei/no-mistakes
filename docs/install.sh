@@ -14,6 +14,7 @@ fi
 
 BIN_PATH="$INSTALL_DIR/no-mistakes"
 LINK_PATH="$LINK_DIR/no-mistakes"
+NOM_LINK_PATH="$LINK_DIR/nom"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -57,25 +58,37 @@ resolve_path() {
   (cd "$1" 2>/dev/null && pwd -P)
 }
 
+# Create a symlink, falling back to sudo when the target directory is not
+# writable. $1 = link path, $2 = link target.
+make_symlink() {
+  symlink_dir="$(dirname "$1")"
+  if [ -w "$symlink_dir" ] || (mkdir -p "$symlink_dir" 2>/dev/null && [ -w "$symlink_dir" ]); then
+    rm -f "$1"
+    ln -s "$2" "$1"
+  else
+    echo "Linking $1 -> $2 (requires sudo)..."
+    sudo mkdir -p "$symlink_dir"
+    sudo rm -f "$1"
+    sudo ln -s "$2" "$1"
+  fi
+}
+
 REAL_INSTALL_DIR="$(resolve_path "$INSTALL_DIR")"
 REAL_LINK_DIR="$(resolve_path "$LINK_DIR" 2>/dev/null || echo "")"
 
 if [ -n "$REAL_INSTALL_DIR" ] && [ "$REAL_INSTALL_DIR" = "$REAL_LINK_DIR" ]; then
-  echo "Install dir and link dir resolve to the same path; skipping symlink."
+  echo "Install dir and link dir resolve to the same path; skipping no-mistakes symlink."
+  # The binary is already on PATH as no-mistakes; still provide the short nom alias.
+  NOM_LINK_PATH="$INSTALL_DIR/nom"
+  make_symlink "$NOM_LINK_PATH" "no-mistakes"
 else
-  if [ -w "$LINK_DIR" ] || (mkdir -p "$LINK_DIR" 2>/dev/null && [ -w "$LINK_DIR" ]); then
-    rm -f "$LINK_PATH"
-    ln -s "$BIN_PATH" "$LINK_PATH"
-  else
-    echo "Linking ${LINK_PATH} to ${BIN_PATH} (requires sudo)..."
-    sudo mkdir -p "$LINK_DIR"
-    sudo rm -f "$LINK_PATH"
-    sudo ln -s "$BIN_PATH" "$LINK_PATH"
-  fi
+  make_symlink "$LINK_PATH" "$BIN_PATH"
+  make_symlink "$NOM_LINK_PATH" "$BIN_PATH"
 fi
 
 echo "no-mistakes ${VERSION} installed to ${BIN_PATH}"
 echo "Command path: ${LINK_PATH} -> ${BIN_PATH}"
+echo "Short alias:  ${NOM_LINK_PATH} (nom)"
 
 "$BIN_PATH" daemon restart >/dev/null
 

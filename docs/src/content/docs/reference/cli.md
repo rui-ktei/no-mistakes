@@ -21,6 +21,8 @@ Unlike `no-mistakes attach`, bare `no-mistakes` only auto-attaches to an active 
 `--skip` only applies when bare `no-mistakes` starts a new pipeline run through the wizard; it does not skip a step on an already-active run.
 Valid step names are `intent`, `rebase`, `review`, `test`, `document`, `lint`, `push`, `pr`, and `ci`.
 
+The installer also adds `nom` as a shorter name for the same binary, so `nom` works anywhere `no-mistakes` does (for example `nom status`, `nom axi run`).
+
 ## no-mistakes init
 
 Initialize or refresh the gate for the current repository.
