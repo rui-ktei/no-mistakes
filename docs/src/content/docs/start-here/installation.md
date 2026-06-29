@@ -9,7 +9,7 @@ description: All install options, prerequisites, update, and uninstall.
 curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh
 ```
 
-The installer keeps the real binary in `~/.no-mistakes/bin` and exposes `no-mistakes` through a symlink in `~/.local/bin` or `/usr/local/bin`. That keeps future `no-mistakes update` runs in a user-owned location instead of rewriting a system binary in place.
+The installer keeps the real binary in `~/.no-mistakes/bin` and exposes `no-mistakes` through a symlink in `~/.local/bin` or `/usr/local/bin`. That keeps future `no-mistakes update` runs in a user-owned location instead of rewriting a system binary in place. It also adds a `nom` symlink next to `no-mistakes`, so the short `nom` name works anywhere `no-mistakes` does.
 
 It also installs or refreshes the background daemon for you by running `no-mistakes daemon restart`, preferring a managed service (launchd on macOS, systemd user service on Linux) and falling back to a detached daemon if that path is unavailable. If the restart fails, the install command fails.
 
@@ -97,7 +97,7 @@ Stop the daemon, delete the binary, and clear state:
 
 ```sh
 no-mistakes daemon stop
-rm -f ~/.local/bin/no-mistakes /usr/local/bin/no-mistakes
+rm -f ~/.local/bin/no-mistakes ~/.local/bin/nom /usr/local/bin/no-mistakes /usr/local/bin/nom
 rm -rf ~/.no-mistakes
 ```
 
