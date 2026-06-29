@@ -125,6 +125,14 @@ func NewHarness(t *testing.T, opts SetupOpts) *Harness {
 	// daemon re-execs itself, also inheriting them.
 	t.Setenv("PATH", h.BinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("HOME", h.HomeDir)
+	// Pin git's global config to a file inside the temp home. Overriding HOME
+	// alone is not enough: git resolves the --global write target via the XDG
+	// path (~/.config/git/config) computed from the real passwd home, not $HOME,
+	// so a test that runs `git config --global` (e.g. fork URL rewrites) would
+	// leak insteadOf entries into the developer's real global config and poison
+	// later runs. GIT_CONFIG_GLOBAL overrides that path unconditionally.
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(h.HomeDir, ".gitconfig"))
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	t.Setenv("NM_HOME", h.NMHome)
 	t.Setenv("FAKEAGENT_LOG", h.AgentLog)
 	if h.Scenario != "" {

@@ -105,14 +105,14 @@ CI logs:
 		return false, fmt.Errorf("agent CI fix: %w", err)
 	}
 
-	return s.commitAndPush(sctx)
+	return s.commitAndPush(sctx, pr.Title)
 }
 
 // commitAndPush commits any uncommitted changes and force-pushes to the
 // configured push remote.
 // Returns (true, nil) when changes were pushed, (false, nil) when there was
 // nothing to commit, or (false, err) on failure.
-func (s *CIStep) commitAndPush(sctx *pipeline.StepContext) (bool, error) {
+func (s *CIStep) commitAndPush(sctx *pipeline.StepContext, prTitle string) (bool, error) {
 	status, err := stepGitRun(sctx, "status", "--porcelain")
 	if err != nil {
 		return false, fmt.Errorf("check CI changes: %w", err)
@@ -129,7 +129,7 @@ func (s *CIStep) commitAndPush(sctx *pipeline.StepContext) (bool, error) {
 	if _, err := stepGitRun(sctx, "add", "-A"); err != nil {
 		return false, fmt.Errorf("stage CI changes: %w", err)
 	}
-	if _, err := stepGitRun(sctx, "commit", "-m", fixedFixCommitMessage(sctx, "apply CI fixes")); err != nil {
+	if _, err := stepGitRun(sctx, "commit", "-m", fixedFixCommitMessageWithPRTitle(sctx, "apply CI fixes", prTitle)); err != nil {
 		return false, fmt.Errorf("commit: %w", err)
 	}
 	headSHA, err := stepGitHeadSHA(sctx)
