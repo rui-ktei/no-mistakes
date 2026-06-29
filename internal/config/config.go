@@ -49,6 +49,10 @@ type GlobalConfig struct {
 	AutoFix              AutoFixRaw
 	Intent               IntentRaw
 	Test                 TestRaw
+	// TicketPrefixPattern applies the work-item title/commit convention to
+	// every gated repo. A per-repo .no-mistakes.yaml value overrides it when
+	// non-empty. Empty (the default) keeps conventional-commit formatting.
+	TicketPrefixPattern string `yaml:"ticket_prefix_pattern"`
 }
 
 // globalConfigRaw is the on-disk YAML representation with duration as string.
@@ -206,6 +210,14 @@ ci_timeout: "168h"
 # Log level for daemon output
 # Options: debug, info, warn, error
 log_level: info
+
+# Work-item title/commit convention. When set to a regexp, no-mistakes matches
+# it against the branch name and prepends the first match (e.g. "WEB-12345: ")
+# to the PR title and to the commit subjects it authors, instead of
+# conventional-commit formatting. A branch with no match falls back to
+# conventional commits, so small changes without a ticket still work. A per-repo
+# .no-mistakes.yaml ticket_prefix_pattern overrides this. Empty = off.
+# ticket_prefix_pattern: 'WEB-\d+'
 
 # Override native agent binary paths (optional)
 # agent_path_override:
@@ -782,11 +794,14 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		AutoFix:              af,
 		Intent:               intent,
 		Test:                 test,
-		TicketPrefixPattern:  repo.TicketPrefixPattern,
+		TicketPrefixPattern:  global.TicketPrefixPattern,
 	}
 
 	if repo.Agent != "" {
 		cfg.Agent = repo.Agent
+	}
+	if repo.TicketPrefixPattern != "" {
+		cfg.TicketPrefixPattern = repo.TicketPrefixPattern
 	}
 
 	return cfg
