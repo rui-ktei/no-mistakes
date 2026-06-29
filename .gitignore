@@ -31,3 +31,9 @@ demo_raw.gif
 # Environment
 .env
 .env.local
+
+# Serena (agent LSP) per-worktree runtime scratch. The shared project config
+# (.serena/project.yml, .serena/.gitignore) is already tracked and stays tracked;
+# this only keeps regenerated/untracked Serena files (run-id project.yml, cache,
+# memories) from being swept into commits by tooling that runs `git add -A`.
+/.serena/
