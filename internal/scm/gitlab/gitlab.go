@@ -142,6 +142,7 @@ type mrPayload struct {
 	IID                 int    `json:"iid"`
 	WebURL              string `json:"web_url"`
 	URL                 string `json:"url"`
+	Title               string `json:"title"`
 	State               string `json:"state"`
 	HasConflicts        bool   `json:"has_conflicts"`
 	DetailedMergeStatus string `json:"detailed_merge_status"`
@@ -153,7 +154,7 @@ func (p mrPayload) toPR() *scm.PR {
 	if url == "" {
 		url = strings.TrimSpace(p.URL)
 	}
-	pr := &scm.PR{URL: url}
+	pr := &scm.PR{URL: url, Title: strings.TrimSpace(p.Title)}
 	if p.IID > 0 {
 		pr.Number = fmt.Sprintf("%d", p.IID)
 	}

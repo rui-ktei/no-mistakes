@@ -159,7 +159,7 @@ func TestFindPRFiltersByBaseBranch(t *testing.T) {
 	t.Parallel()
 
 	host := New(githubTestCmdFactory(map[string]githubTestResponse{
-		"gh pr list --head feature/refactor --base release/1.0 --state open --json number,url": {
+		"gh pr list --head feature/refactor --base release/1.0 --state open --json number,url,title": {
 			stdout: `[{"number":42,"url":"https://github.example.com/org/repo/pull/42"}]` + "\n",
 		},
 	}), nil, "")
@@ -184,11 +184,11 @@ func TestFindPRForkUsesBareHeadAndFiltersOwner(t *testing.T) {
 
 	branch := "feature/refactor"
 	host := NewWithFork(githubTestCmdFactory(map[string]githubTestResponse{
-		"gh pr list --head fork-owner:" + branch + " --base main --repo parent/repo --state open --json number,url,headRefName,headRepositoryOwner": {
+		"gh pr list --head fork-owner:" + branch + " --base main --repo parent/repo --state open --json number,url,title,headRefName,headRepositoryOwner": {
 			stderr: `invalid argument: "--head" does not support "<owner>:<branch>"` + "\n",
 			code:   1,
 		},
-		"gh pr list --head " + branch + " --base main --repo parent/repo --state open --json number,url,headRefName,headRepositoryOwner": {
+		"gh pr list --head " + branch + " --base main --repo parent/repo --state open --json number,url,title,headRefName,headRepositoryOwner": {
 			stdout: `[` +
 				`{"number":40,"url":"https://github.com/parent/repo/pull/40","headRefName":"feature/refactor","headRepositoryOwner":{"login":"other-owner"}},` +
 				`{"number":42,"url":"https://github.com/parent/repo/pull/42","headRefName":"feature/refactor","headRepositoryOwner":{"login":"fork-owner"}}` +
@@ -215,7 +215,7 @@ func TestFindPRReturnsCLIError(t *testing.T) {
 	t.Parallel()
 
 	host := New(githubTestCmdFactory(map[string]githubTestResponse{
-		"gh pr list --head feature/refactor --base main --state open --json number,url": {
+		"gh pr list --head feature/refactor --base main --state open --json number,url,title": {
 			stderr: "api unavailable\n",
 			code:   1,
 		},

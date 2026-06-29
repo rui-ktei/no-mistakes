@@ -125,9 +125,9 @@ func (h *Host) FindPR(ctx context.Context, branch, base string) (*scm.PR, error)
 		args = append(args, "--base", base)
 	}
 	args = append(args, h.repoArgs()...)
-	jsonFields := "number,url"
+	jsonFields := "number,url,title"
 	if h.forkOwner != "" {
-		jsonFields = "number,url,headRefName,headRepositoryOwner"
+		jsonFields = "number,url,title,headRefName,headRepositoryOwner"
 	}
 	args = append(args, "--state", "open", "--json", jsonFields)
 	cmd := h.cmd(ctx, "gh", args...)
@@ -138,6 +138,7 @@ func (h *Host) FindPR(ctx context.Context, branch, base string) (*scm.PR, error)
 	var prs []struct {
 		Number              int    `json:"number"`
 		URL                 string `json:"url"`
+		Title               string `json:"title"`
 		HeadRefName         string `json:"headRefName"`
 		HeadRepositoryOwner *struct {
 			Login string `json:"login"`
@@ -150,7 +151,7 @@ func (h *Host) FindPR(ctx context.Context, branch, base string) (*scm.PR, error)
 		if !h.matchesHead(candidate.HeadRefName, candidate.HeadRepositoryOwner, branch) {
 			continue
 		}
-		pr := &scm.PR{URL: strings.TrimSpace(candidate.URL)}
+		pr := &scm.PR{URL: strings.TrimSpace(candidate.URL), Title: strings.TrimSpace(candidate.Title)}
 		if candidate.Number > 0 {
 			pr.Number = fmt.Sprintf("%d", candidate.Number)
 		} else if num, nerr := scm.ExtractPRNumber(pr.URL); nerr == nil {

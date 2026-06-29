@@ -61,10 +61,20 @@ func ApplyTicketPrefix(title, ticket string) string {
 	if m := titleRe.FindStringSubmatch(title); len(m) > 0 && validTypes[m[1]] {
 		desc = strings.TrimSpace(m[4])
 	}
+	desc = stripTicketToken(desc, ticket)
 	if desc == "" {
 		return ticket
 	}
 	return ticket + ": " + desc
+}
+
+var whitespaceRe = regexp.MustCompile(`\s+`)
+
+func stripTicketToken(desc, ticket string) string {
+	tokenRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(ticket) + `\b`)
+	desc = tokenRe.ReplaceAllString(desc, " ")
+	desc = whitespaceRe.ReplaceAllString(desc, " ")
+	return strings.Trim(desc, " :-")
 }
 
 func TightenTitle(title string) string {
