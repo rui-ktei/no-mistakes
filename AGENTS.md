@@ -59,6 +59,8 @@ Safest local verification sequence after non-trivial changes:
 
 **Fork Routing**
 
+- **HARD RULE: Never push commits or raise PRs directly to the upstream repository. All git pushes and PRs must target the developer's fork origin. Only target upstream if the developer explicitly asks.**
+
 - `repos.upstream_url` is the parent repository used for PR base routing.
 - `repos.fork_url` is an optional GitHub fork push target.
 - `no-mistakes init --fork-url <url>` expects `origin` to point at the GitHub parent repository and `<url>` to point at the contributor fork.
