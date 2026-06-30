@@ -397,7 +397,7 @@ func stopDetachedDaemon(p *paths.Paths) error {
 			return nil
 		}
 		if killErr := stopDetachedDaemonByPID(p); killErr != nil {
-			if _, statErr := os.Stat(p.Socket()); os.IsNotExist(statErr) {
+			if accepting, _ := daemonSocketAcceptingConnections(p.Socket()); !accepting {
 				cleanupDaemonArtifacts(p)
 				return nil
 			}
