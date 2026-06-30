@@ -397,6 +397,10 @@ func stopDetachedDaemon(p *paths.Paths) error {
 			return nil
 		}
 		if killErr := stopDetachedDaemonByPID(p); killErr != nil {
+			if _, statErr := os.Stat(p.Socket()); os.IsNotExist(statErr) {
+				cleanupDaemonArtifacts(p)
+				return nil
+			}
 			return fmt.Errorf("dial daemon: %w; pid fallback: %v", err, killErr)
 		}
 		return nil
@@ -532,6 +536,10 @@ func waitForDaemonStop(p *paths.Paths) error {
 	// Try to kill by PID as last resort.
 	if pid, err := ReadPID(p); err == nil {
 		if err := validateDaemonPIDFallback(p, pid); err != nil {
+			if alive, hcErr := daemonHealthCheck(p); !alive && hcErr == nil {
+				cleanupDaemonArtifacts(p)
+				return nil
+			}
 			return err
 		}
 		slog.Warn("daemon did not stop gracefully, killing", "pid", pid)

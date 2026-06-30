@@ -590,6 +590,41 @@ func TestStopDetachedDaemonKeepsArtifactsWhenPIDMissingButDaemonLooksLive(t *tes
 	}
 }
 
+func TestStopDetachedDaemon_SucceedsWhenPIDReusedAndDaemonDead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only: no unix socket")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "dtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	p := paths.WithRoot(tmpDir)
+	if err := p.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDaemonPIDRecord(t, p.PIDFile(), daemonPIDFile{
+		PID:       os.Getpid(),
+		StartedAt: time.Now().Add(-24 * time.Hour),
+	})
+
+	originalDial := daemonDial
+	daemonDial = func(string) (*ipc.Client, error) {
+		return nil, fmt.Errorf("no daemon socket")
+	}
+	defer func() { daemonDial = originalDial }()
+
+	if err := stopDetachedDaemon(p); err != nil {
+		t.Fatalf("expected stopDetachedDaemon to succeed with reused PID, got %v", err)
+	}
+	if _, statErr := os.Stat(p.PIDFile()); !os.IsNotExist(statErr) {
+		t.Fatal("expected stale PID file to be cleaned up")
+	}
+}
+
 func TestStaleDaemonArtifactsRejectsNonPositivePID(t *testing.T) {
 	tests := []struct {
 		name string
