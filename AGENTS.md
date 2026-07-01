@@ -143,6 +143,7 @@ Safest local verification sequence after non-trivial changes:
 - Prefer targeted package tests while iterating, then finish with `go test -race ./...` and `make e2e` when your change affects those process or I/O boundaries.
 - The e2e suite lives behind the `e2e` build tag, so it is excluded from `go test ./...` and runs separately in CI via `make e2e`.
 - Never run the `e2e`-tagged suite (`make e2e` / `go test -tags e2e ...`) from inside a gated no-mistakes pipeline run (e.g. while validating with `no-mistakes axi run`). Each e2e test spawns its own daemon, and running that concurrently with the live pipeline daemon and its agent subprocesses starves the nested daemon's startup handshake past the harness timeouts, so `init` appears to hang. This is resource contention, not a regression - the same tests pass standalone under normal load. Inside a gated run, rely on the configured baseline `go test -race ./...` (which excludes the `e2e` tag) plus focused tests against real temp git repos for evidence; run `make e2e` separately, outside the pipeline.
+- `make e2e` sweeps both `./internal/e2e/...` (full journey suite) and `./internal/pipeline/steps/...`, so step-local e2e tests (e.g. `internal/pipeline/steps/*_e2e_test.go`, gated by `//go:build e2e`) are also covered. Keep new step-local e2e tests behind the `e2e` tag so `go test ./...` still skips them.
 
 **Repo Config Trust Boundary (security)**
 
