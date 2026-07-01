@@ -21,6 +21,7 @@ When set, everything else moves under this root:
 - Database: `$NM_HOME/state.sqlite`
 - Socket / PID: `$NM_HOME/socket` and `$NM_HOME/daemon.pid`
 - Managed agent server PID records: `$NM_HOME/servers/`
+- Per-run agent homes: `$NM_HOME/agent-homes/<runID>/` (an isolated, ephemeral `NM_HOME` handed to each daemon-spawned pipeline agent so any `no-mistakes` CLI it runs resolves to a disposable daemon instead of the orchestrator's; created before the agent starts and removed when the run ends)
 - Managed service names get a short stable suffix derived from `$NM_HOME` so multiple installs don't collide.
 
 ## `NO_MISTAKES_BITBUCKET_EMAIL`
