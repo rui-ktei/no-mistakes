@@ -18,8 +18,9 @@ import (
 // emitting JSONL events on stdout. The lifecycle is codex/pi-shaped: one
 // process per Run, no managed server.
 type copilotAgent struct {
-	bin       string
-	extraArgs []string
+	bin          string
+	extraArgs    []string
+	envOverrides map[string]string
 }
 
 func (a *copilotAgent) Name() string { return "copilot" }
@@ -38,7 +39,7 @@ func (a *copilotAgent) runOnce(ctx context.Context, opts RunOpts) (*Result, erro
 	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Dir = opts.CWD
 	cmd.Stdin = nil
-	cmd.Env = gitSafeEnv(opts.CWD)
+	cmd.Env = agentEnv(opts.CWD, a.envOverrides)
 	shellenv.ConfigureShellCommand(cmd)
 
 	var stderrBuf []byte

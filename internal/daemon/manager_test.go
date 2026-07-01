@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kunchenguid/no-mistakes/internal/ipc"
+	"github.com/kunchenguid/no-mistakes/internal/paths"
 	"github.com/kunchenguid/no-mistakes/internal/pipeline"
 	"github.com/kunchenguid/no-mistakes/internal/telemetry"
 	"github.com/kunchenguid/no-mistakes/internal/types"
@@ -429,5 +430,67 @@ func TestPushReceivedDemoModeBypassesAgentResolution(t *testing.T) {
 	}
 	if step.execCnt.Load() == 0 {
 		t.Error("mock step was never executed")
+	}
+}
+
+// agentHomeProbeStep records, while the run is live, whether the run's
+// isolated agent home exists on disk.
+type agentHomeProbeStep struct {
+	name          types.StepName
+	paths         func() *paths.Paths
+	homePath      string
+	existedMidRun bool
+}
+
+func (s *agentHomeProbeStep) Name() types.StepName { return s.name }
+func (s *agentHomeProbeStep) Execute(sctx *pipeline.StepContext) (*pipeline.StepOutcome, error) {
+	s.homePath = s.paths().AgentHomeDir(sctx.Run.ID)
+	if _, err := os.Stat(s.homePath); err == nil {
+		s.existedMidRun = true
+	}
+	return &pipeline.StepOutcome{}, nil
+}
+
+func TestPushReceivedCreatesAndCleansUpAgentHome(t *testing.T) {
+	probe := &agentHomeProbeStep{name: types.StepReview}
+	var p *paths.Paths
+	probe.paths = func() *paths.Paths { return p }
+
+	pp, d := startTestDaemonWithSteps(t, func() []pipeline.Step {
+		return []pipeline.Step{probe}
+	})
+	p = pp
+
+	_, headSHA := setupTestGitRepo(t, p, d, "agent-home-repo")
+
+	client, err := ipc.Dial(p.Socket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	var result ipc.PushReceivedResult
+	if err := client.Call(ipc.MethodPushReceived, &ipc.PushReceivedParams{
+		Gate: p.RepoDir("agent-home-repo"),
+		Ref:  "refs/heads/main",
+		Old:  "0000000000000000000000000000000000000000",
+		New:  headSHA,
+	}, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	run := waitForRunTerminalState(t, d, result.RunID)
+	if run.Status != types.RunCompleted {
+		t.Fatalf("run status = %q, want %q", run.Status, types.RunCompleted)
+	}
+
+	if !probe.existedMidRun {
+		t.Fatalf("agent home %q did not exist while the run was live; it must be created before the agent spawns", probe.homePath)
+	}
+	if probe.homePath == "" {
+		t.Fatal("probe never recorded the agent home path")
+	}
+	if _, err := os.Stat(probe.homePath); !os.IsNotExist(err) {
+		t.Fatalf("agent home %q still present after run reached terminal state (stat err: %v); it must be cleaned up", probe.homePath, err)
 	}
 }

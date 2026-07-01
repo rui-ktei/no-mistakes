@@ -16,9 +16,10 @@ import (
 const acpxScannerMaxTokenSize = 256 * 1024 * 1024
 
 type acpxAgent struct {
-	bin        string
-	target     string
-	rawCommand string
+	bin          string
+	target       string
+	rawCommand   string
+	envOverrides map[string]string
 }
 
 func (a *acpxAgent) Name() string { return "acp:" + a.target }
@@ -34,7 +35,7 @@ func (a *acpxAgent) runOnce(ctx context.Context, opts RunOpts) (*Result, error) 
 	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Dir = opts.CWD
 	cmd.Stdin = nil
-	cmd.Env = gitSafeEnv(opts.CWD)
+	cmd.Env = agentEnv(opts.CWD, a.envOverrides)
 	shellenv.ConfigureShellCommand(cmd)
 
 	started, err := startNativeAgentCommand(cmd)

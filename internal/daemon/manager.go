@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -351,10 +352,16 @@ func (m *RunManager) startRun(ctx context.Context, repo *db.Repo, branch, headSH
 	// Track whether the background goroutine takes ownership of worktree cleanup.
 	// If setup fails before the goroutine launches, we must clean up here.
 	bgOwnsWorktree := false
+	agentHomeToClean := ""
 	defer func() {
 		if !bgOwnsWorktree {
 			if rmErr := git.WorktreeRemove(context.Background(), gateDir, wtDir); rmErr != nil {
 				slog.Warn("failed to remove worktree during setup cleanup", "path", wtDir, "error", rmErr)
+			}
+			if agentHomeToClean != "" {
+				if rmErr := os.RemoveAll(agentHomeToClean); rmErr != nil {
+					slog.Warn("failed to remove agent home during setup cleanup", "path", agentHomeToClean, "error", rmErr)
+				}
 			}
 		}
 	}()
@@ -400,6 +407,7 @@ func (m *RunManager) startRun(ctx context.Context, repo *db.Repo, branch, headSH
 
 	// Create agent. In demo mode, skip resolution and use a no-op agent.
 	var ag agent.Agent
+	agentHome := ""
 	if steps.IsDemoMode() {
 		ag = agent.NewNoop()
 	} else {
@@ -408,9 +416,22 @@ func (m *RunManager) startRun(ctx context.Context, repo *db.Repo, branch, headSH
 			trackStartFailure("resolve_agent")
 			return "", err
 		}
+		// Redirect the agent to an isolated, per-run NM_HOME so any
+		// no-mistakes CLI it runs (e.g. the test step's evidence agent
+		// building and exercising the project's own binary) resolves to a
+		// disposable daemon (its own socket/pid) and cannot stop, restart, or
+		// otherwise reenter this orchestrating run via the shared home.
+		agentHome = m.paths.AgentHomeDir(run.ID)
+		if err := os.MkdirAll(agentHome, 0o755); err != nil {
+			m.db.UpdateRunError(run.ID, fmt.Sprintf("create agent home: %s", err))
+			trackStartFailure("create_agent_home")
+			return "", fmt.Errorf("create agent home: %w", err)
+		}
+		agentHomeToClean = agentHome
 		var agErr error
 		ag, agErr = agent.NewWithOptions(cfg.Agent, cfg.AgentPath(), cfg.AgentArgs(), agent.Options{
 			ACPRegistryOverrides: cfg.ACPRegistryOverrides,
+			EnvOverrides:         map[string]string{"NM_HOME": agentHome},
 		})
 		if agErr != nil {
 			m.db.UpdateRunError(run.ID, fmt.Sprintf("create agent: %s", agErr))
@@ -486,6 +507,13 @@ func (m *RunManager) startRun(ctx context.Context, repo *db.Repo, branch, headSH
 			// Clean up worktree.
 			if rmErr := git.WorktreeRemove(context.Background(), gateDir, wtDir); rmErr != nil {
 				slog.Warn("failed to remove worktree", "path", wtDir, "error", rmErr)
+			}
+			// Clean up the isolated agent home. Best-effort and idempotent: a
+			// leftover empty dir is harmless and swept on next start.
+			if agentHome != "" {
+				if rmErr := os.RemoveAll(agentHome); rmErr != nil {
+					slog.Warn("failed to remove agent home", "path", agentHome, "error", rmErr)
+				}
 			}
 			// Remove tracking.
 			m.mu.Lock()

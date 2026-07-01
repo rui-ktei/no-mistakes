@@ -184,6 +184,7 @@ Everything lives under `~/.no-mistakes/` by default. Set `NM_HOME` to relocate i
 | `repos/<id>.git` | Bare gate repos |
 | `repos/<id>.git/notify-push.log` | Persistent hook notification failure log |
 | `worktrees/<repoID>/<runID>/` | Disposable worktrees (cleaned up after each run) |
+| `agent-homes/<runID>/` | Isolated, ephemeral `NM_HOME` for each run's agent (cleaned up after each run) |
 | `logs/<runID>/<step>.log` | Per-step log files |
 | `logs/daemon.log` | Daemon log |
 | `logs/wizard-agent.log` | Managed agent-server output captured during setup wizard runs |

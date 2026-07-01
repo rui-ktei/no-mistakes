@@ -67,9 +67,12 @@ The daemon writes an identity record to `~/.no-mistakes/daemon.pid` and listens 
 When a push arrives via the post-receive hook:
 
 1. Creates a detached worktree at `~/.no-mistakes/worktrees/<repoID>/<runID>/`
-2. Starts the pipeline executor in that worktree
-3. Streams events to any connected TUI clients and serves request/response state to AXI clients
-4. Cleans up the worktree when the run finishes (success or failure)
+2. Creates an isolated, ephemeral agent home at `~/.no-mistakes/agent-homes/<runID>/` and points the run's agent at it as `NM_HOME`
+3. Starts the pipeline executor in that worktree
+4. Streams events to any connected TUI clients and serves request/response state to AXI clients
+5. Cleans up the worktree and the isolated agent home when the run finishes (success or failure)
+
+The isolated agent home keeps a run's agent from reentering the orchestrating daemon: any `no-mistakes` CLI the agent runs (for example when no-mistakes gates its own repository) resolves to a disposable daemon with its own socket and pid rather than stopping or restarting the live run through a shared `NM_HOME`.
 
 Pipeline agents are prompted to keep intentional writes inside that detached worktree and avoid changing system state outside it, such as Homebrew packages, apps under `/Applications`, or global tool configuration.
 That reduces surprising machine-level side effects and macOS App Management prompts, but it is prompt steering rather than a true sandbox.

@@ -17,8 +17,9 @@ import (
 
 // codexAgent spawns the codex CLI for each invocation.
 type codexAgent struct {
-	bin       string
-	extraArgs []string
+	bin          string
+	extraArgs    []string
+	envOverrides map[string]string
 }
 
 func (a *codexAgent) Name() string { return "codex" }
@@ -61,7 +62,7 @@ func (a *codexAgent) runOnce(ctx context.Context, opts RunOpts) (*Result, error)
 	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Dir = opts.CWD
 	cmd.Stdin = nil
-	cmd.Env = gitSafeEnv(opts.CWD)
+	cmd.Env = agentEnv(opts.CWD, a.envOverrides)
 	shellenv.ConfigureShellCommand(cmd)
 
 	var stderrBuf []byte

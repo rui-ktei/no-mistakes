@@ -60,6 +60,17 @@ func (p *Paths) CLILog() string    { return filepath.Join(p.root, "logs", "cli.l
 // behind by a crashed predecessor.
 func (p *Paths) ServerPIDsDir() string { return filepath.Join(p.root, "servers") }
 
+// AgentHomesDir holds the per-run ephemeral NM_HOME directories handed to
+// daemon-spawned agents so a no-mistakes CLI the agent runs resolves to a
+// disposable daemon (its own socket/pid) instead of reentering the
+// orchestrating run.
+func (p *Paths) AgentHomesDir() string { return filepath.Join(p.root, "agent-homes") }
+
+// AgentHomeDir is the ephemeral NM_HOME for a single run's agent.
+func (p *Paths) AgentHomeDir(runID string) string {
+	return filepath.Join(p.AgentHomesDir(), runID)
+}
+
 // EnsureDirs creates all required directories under root.
 func (p *Paths) EnsureDirs() error {
 	dirs := []string{
