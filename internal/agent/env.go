@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/kunchenguid/no-mistakes/internal/git"
+import (
+	"strings"
+
+	"github.com/kunchenguid/no-mistakes/internal/git"
+)
 
 // gitSafeEnv returns the environment for a spawned agent subprocess with git
 // forced into non-interactive mode. Agents shell out to git directly (for
@@ -12,4 +16,32 @@ import "github.com/kunchenguid/no-mistakes/internal/git"
 // directory; see git.NonInteractiveEnv for why this matters.
 func gitSafeEnv(dir string) []string {
 	return git.NonInteractiveEnv(dir)
+}
+
+// agentEnv builds the subprocess environment for a spawned agent: the
+// git-safe base environment with envOverrides applied on top. An override
+// replaces any inherited value for the same key, so a daemon-spawned agent
+// can be redirected to an isolated NM_HOME that does not resolve to the
+// orchestrator's socket and pid.
+func agentEnv(dir string, envOverrides map[string]string) []string {
+	return applyEnvOverrides(gitSafeEnv(dir), envOverrides)
+}
+
+func applyEnvOverrides(env []string, overrides map[string]string) []string {
+	for key, value := range overrides {
+		env = setEnvValue(env, key, value)
+	}
+	return env
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	entry := key + "=" + value
+	prefix := key + "="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			env[i] = entry
+			return env
+		}
+	}
+	return append(env, entry)
 }

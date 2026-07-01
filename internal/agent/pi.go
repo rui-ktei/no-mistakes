@@ -17,8 +17,9 @@ import (
 // stdin and emits JSONL on stdout when --mode json is set. The lifecycle is
 // codex-shaped: one process per Run, no managed server.
 type piAgent struct {
-	bin       string
-	extraArgs []string
+	bin          string
+	extraArgs    []string
+	envOverrides map[string]string
 }
 
 func (a *piAgent) Name() string { return "pi" }
@@ -35,7 +36,7 @@ func (a *piAgent) runOnce(ctx context.Context, opts RunOpts) (*Result, error) {
 	args := a.buildArgs()
 	cmd := exec.CommandContext(ctx, a.bin, args...)
 	cmd.Dir = opts.CWD
-	cmd.Env = gitSafeEnv(opts.CWD)
+	cmd.Env = agentEnv(opts.CWD, a.envOverrides)
 	shellenv.ConfigureShellCommand(cmd)
 
 	stdin, err := cmd.StdinPipe()

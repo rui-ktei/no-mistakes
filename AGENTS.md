@@ -115,6 +115,10 @@ Safest local verification sequence after non-trivial changes:
 - Use `context.Background()` mainly at top-level boundaries, background tasks, or in tests.
 - Protect shared mutable state with `sync.Mutex`, `sync.RWMutex`, `sync.Map`, or `atomic` where appropriate.
 - Be explicit about ownership and cleanup of goroutines, worktrees, temp dirs, and channels.
+- **Every daemon-spawned pipeline agent runs with an isolated, per-run `NM_HOME`** (`<NM_HOME>/agent-homes/<runID>`, created `0o755` before the agent is constructed, removed on run end). Without it the agent inherits the orchestrating daemon's `NM_HOME`, so any `no-mistakes` CLI the agent runs (the `test` step's evidence agent builds and exercises the project's own binary when self-gating) resolves to the SAME socket/pid/gate as the orchestrator and tears it down mid-run (`daemon crashed during execution`, test step `duration_ms: 0`); this is why both earlier self-gating PRs needed `--skip test`.
+  The override is applied at one chokepoint - `agent.Options.EnvOverrides` (keyed `NM_HOME`), applied in `agentEnv` (`internal/agent/env.go`) where every native runner builds `cmd.Env`, and threaded through `startServerWithPort` for the managed-server backends (opencode, rovodev) - so it covers all backends and all steps.
+  The daemon's own home and `internal/paths` `NM_HOME` precedence are unchanged; only the child agent's environment is redirected. Cleanup is best-effort and idempotent (a leftover empty dir is harmless).
+  Set once in `internal/daemon/manager.go` `startRun` and torn down in the run goroutine's teardown defer. Never read the orchestrator's `NM_HOME` from inside an agent backend. Regressions: `TestAgent_EnvOverrideIsolatesNMHome` (agent chokepoint + distinct socket), `TestPushReceivedCreatesAndCleansUpAgentHome` (lifecycle).
 
 **Filesystem and Paths**
 

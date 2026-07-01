@@ -10,10 +10,11 @@ import (
 // opencodeAgent starts a persistent HTTP server via `opencode serve`
 // and sends requests via REST with SSE streaming.
 type opencodeAgent struct {
-	bin       string
-	extraArgs []string
-	mu        sync.Mutex
-	server    *managedServer
+	bin          string
+	extraArgs    []string
+	envOverrides map[string]string
+	mu           sync.Mutex
+	server       *managedServer
 }
 
 func (a *opencodeAgent) Name() string { return "opencode" }

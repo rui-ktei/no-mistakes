@@ -49,8 +49,13 @@ type TokenUsage struct {
 
 // Options configures backend-specific agent construction behavior.
 // ACPRegistryOverrides maps acpx target names to raw ACP agent commands.
+// EnvOverrides are applied to every spawned agent subprocess's environment,
+// replacing any inherited value for the same key; the daemon uses this to
+// redirect NM_HOME to an isolated, per-run directory so a no-mistakes CLI the
+// agent runs cannot reenter the orchestrating daemon.
 type Options struct {
 	ACPRegistryOverrides map[string]string
+	EnvOverrides         map[string]string
 }
 
 func finalizeTextResult(agentName, text string, schema json.RawMessage, usage TokenUsage) (*Result, error) {
@@ -590,21 +595,21 @@ func NewWithOptions(name types.AgentName, bin string, extraArgs []string, opts O
 		if opts.ACPRegistryOverrides != nil {
 			rawCommand = opts.ACPRegistryOverrides[target]
 		}
-		return &acpxAgent{bin: bin, target: target, rawCommand: rawCommand}, nil
+		return &acpxAgent{bin: bin, target: target, rawCommand: rawCommand, envOverrides: opts.EnvOverrides}, nil
 	}
 	switch name {
 	case types.AgentClaude:
-		return &claudeAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &claudeAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	case types.AgentCodex:
-		return &codexAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &codexAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	case types.AgentRovoDev:
-		return &rovodevAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &rovodevAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	case types.AgentOpenCode:
-		return &opencodeAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &opencodeAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	case types.AgentPi:
-		return &piAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &piAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	case types.AgentCopilot:
-		return &copilotAgent{bin: bin, extraArgs: extraArgs}, nil
+		return &copilotAgent{bin: bin, extraArgs: extraArgs, envOverrides: opts.EnvOverrides}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent %q; valid options: auto, claude, codex, rovodev, opencode, pi, copilot, acp:<target> (set 'agent' in ~/.no-mistakes/config.yaml)", name)
 	}
