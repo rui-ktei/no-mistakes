@@ -52,6 +52,34 @@ type StepContext struct {
 	// was trying to accomplish, inferred from local agent transcripts. It's
 	// surfaced in step prompts so agents have context beyond the diff.
 	UserIntent string
+	// Scratch is in-memory, non-persisted state shared across the steps of a
+	// single run. The executor creates one per run and threads the same pointer
+	// into every step's context, so a later step can read what an earlier step
+	// discovered (e.g. the command-proposal path reads the canonical commands
+	// the test/lint discovery agents reported).
+	Scratch *RunScratch
+}
+
+// RunScratch is per-run, in-memory state shared across steps. It is never
+// persisted; it exists only to pass discovery results forward within a run.
+type RunScratch struct {
+	// DiscoveredCommands maps a commands.* field name to the canonical command a
+	// discovery agent reported for it this run. Populated by the test and lint
+	// steps (only for fields unset in the effective config); consumed by the
+	// command-proposal path in the push step.
+	DiscoveredCommands map[config.CommandField]string
+}
+
+// RecordDiscoveredCommand stores a non-empty canonical command for a field.
+// Safe to call on a nil scratch (no-op) so steps need not nil-check.
+func (s *RunScratch) RecordDiscoveredCommand(field config.CommandField, command string) {
+	if s == nil || strings.TrimSpace(command) == "" {
+		return
+	}
+	if s.DiscoveredCommands == nil {
+		s.DiscoveredCommands = map[config.CommandField]string{}
+	}
+	s.DiscoveredCommands[field] = command
 }
 
 // IntegrationBranch returns the effective base branch for this run, applying
@@ -79,6 +107,12 @@ type StepOutcome struct {
 	// mode so the executor can persist it on the round record and later
 	// rounds can reference what was previously attempted.
 	FixSummary string
+
+	// DiscoveredCommands carries the canonical command(s) a discovery agent
+	// reported this round, keyed by commands.* field. The executor merges these
+	// into the run scratch so the command-proposal path can read them. Steps
+	// populate it only for fields that were unset in the effective config.
+	DiscoveredCommands map[config.CommandField]string
 
 	// DurationOverrideMS, when positive, replaces the wall-clock duration
 	// reported for this step. Used by demo mode to show realistic durations

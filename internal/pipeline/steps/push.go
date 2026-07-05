@@ -21,6 +21,15 @@ func (s *PushStep) Execute(sctx *pipeline.StepContext) (*pipeline.StepOutcome, e
 	ctx := sctx.Ctx
 	newHeadSHA := ""
 
+	// Propose the canonical test/lint/format commands the discovery agents used
+	// as a dedicated commit on the branch (a no-op unless enabled and there is a
+	// new, unset command to pin). It runs before staging so the proposal is its
+	// own commit, not bundled into the "apply agent fixes" commit below, and
+	// rides the branch through the lease-guarded push.
+	if err := proposeDiscoveredCommands(sctx); err != nil {
+		return nil, fmt.Errorf("propose discovered commands: %w", err)
+	}
+
 	// Run format command if configured (before committing, so changes are formatted)
 	if fmtCmd := sctx.Config.Commands.Format; fmtCmd != "" {
 		sctx.Log(fmt.Sprintf("running formatter: %s", fmtCmd))

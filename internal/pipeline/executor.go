@@ -125,6 +125,10 @@ func (e *Executor) Execute(ctx context.Context, run *db.Run, repo *db.Repo, work
 		return e.failRun(run, repo, fmt.Errorf("create log dir: %w", err))
 	}
 
+	// Per-run scratch shared across steps (e.g. discovered commands flow from
+	// the test/lint steps forward to the push step's command-proposal path).
+	scratch := &RunScratch{DiscoveredCommands: map[config.CommandField]string{}}
+
 	// Create step result records in DB
 	stepRecords := make(map[types.StepName]*db.StepResult)
 	for _, step := range e.steps {
@@ -149,7 +153,7 @@ func (e *Executor) Execute(ctx context.Context, run *db.Run, repo *db.Repo, work
 			e.emitStepEventWithFindingsDiffAndError(ipc.EventStepCompleted, run, repo, step.Name(), string(types.StepStatusSkipped), "", "", "", nil)
 			continue
 		}
-		skipRemaining, err := e.executeStep(ctx, step, sr, run, repo, workDir, logDir)
+		skipRemaining, err := e.executeStep(ctx, step, sr, run, repo, workDir, logDir, scratch)
 		if err != nil {
 			return e.failRun(run, repo, err, ctx)
 		}
@@ -177,7 +181,7 @@ func (e *Executor) Execute(ctx context.Context, run *db.Run, repo *db.Repo, work
 
 // executeStep runs a single step with approval coordination.
 // Returns (skipRemaining, error).
-func (e *Executor) executeStep(ctx context.Context, step Step, sr *db.StepResult, run *db.Run, repo *db.Repo, workDir, logDir string) (bool, error) {
+func (e *Executor) executeStep(ctx context.Context, step Step, sr *db.StepResult, run *db.Run, repo *db.Repo, workDir, logDir string, scratch *RunScratch) (bool, error) {
 	stepName := step.Name()
 	logPath := filepath.Join(logDir, string(stepName)+".log")
 	finalExitCode := 0
@@ -218,6 +222,7 @@ func (e *Executor) executeStep(ctx context.Context, step Step, sr *db.StepResult
 		DB:           e.db,
 		StepResultID: sr.ID,
 		UserIntent:   userIntent,
+		Scratch:      scratch,
 		Log: func(text string) {
 			if text != "" {
 				prefix := ""
@@ -276,6 +281,10 @@ func (e *Executor) executeStep(ctx context.Context, step Step, sr *db.StepResult
 		outcome.Findings = normalizeFindingsJSON(outcome.Findings, string(stepName))
 		finalExitCode = outcome.ExitCode
 		durationOverrideMS += outcome.DurationOverrideMS
+
+		for field, command := range outcome.DiscoveredCommands {
+			scratch.RecordDiscoveredCommand(field, command)
+		}
 
 		if outcome.Findings != "" {
 			if dbErr := e.db.SetStepFindings(sr.ID, outcome.Findings); dbErr != nil {

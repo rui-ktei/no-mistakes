@@ -33,6 +33,8 @@ ci_timeout: "168h"
 
 log_level: info
 
+propose_commands: true
+
 ticket_prefix_pattern: 'WEB-\d+'
 
 auto_fix:
@@ -213,6 +215,17 @@ Daemon log verbosity.
 | Type | `string` |
 | Values | `debug`, `info`, `warn`, `error` |
 | Default | `info` |
+
+### propose_commands
+
+Global default for whether a run proposes the canonical `commands.{test,lint,format}` a discovery agent used as an edit to a repo's `.no-mistakes.yaml`, so a human merge to the default branch promotes them to trusted, executed config and future runs skip rediscovery.
+
+| | |
+|---|---|
+| Type | `bool` |
+| Default | `true` |
+
+The proposal is a dedicated branch commit surfaced in the PR; it is inert until merged to the default branch (`commands.*` are read only from the trusted default branch), so it never executes within the discovering run and never widens the trust boundary. A repo's default-branch `.no-mistakes.yaml` may override this via [`propose_commands`](/no-mistakes/reference/repo-config/#propose_commands) (read only from the trusted copy, like `allow_repo_commands`). Set to `false` to turn it off everywhere.
 
 ### ticket_prefix_pattern
 

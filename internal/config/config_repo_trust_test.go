@@ -28,6 +28,21 @@ func TestLoadRepoFromBytes_InvalidYAML(t *testing.T) {
 	}
 }
 
+// TestLoadRepoFromBytes_TicketPrefixPattern guards against the custom
+// RepoConfig.UnmarshalYAML dropping ticket_prefix_pattern: because RepoConfig
+// decodes through an inner raw struct, every honored field must be listed there
+// and copied out, or it silently disappears from a parsed .no-mistakes.yaml.
+func TestLoadRepoFromBytes_TicketPrefixPattern(t *testing.T) {
+	data := []byte("ticket_prefix_pattern: 'WEB-\\d+'\ncommands:\n  test: go test ./...\n")
+	cfg, err := LoadRepoFromBytes(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.TicketPrefixPattern != `WEB-\d+` {
+		t.Fatalf("ticket_prefix_pattern = %q, want %q (dropped by UnmarshalYAML?)", cfg.TicketPrefixPattern, `WEB-\d+`)
+	}
+}
+
 func TestEffectiveRepoConfig_TrustedOverridesPushedCommands(t *testing.T) {
 	pushed := &RepoConfig{
 		Agent: types.AgentCodex,
@@ -135,6 +150,23 @@ func TestEffectiveRepoConfig_NoTrustedDisablesCommands(t *testing.T) {
 	// agent that launches with the maintainer's credentials.
 	if got.Agent != "" {
 		t.Errorf("agent = %q, want empty (no trusted config)", got.Agent)
+	}
+}
+
+// TestEffectiveRepoConfig_UnmergedProposalNotExecuted models the command-
+// proposal lifecycle: a run writes a proposed command into the branch's
+// .no-mistakes.yaml (the pushed copy), but until it is merged to the default
+// branch the trusted copy still lacks it, so a later run must not execute it.
+func TestEffectiveRepoConfig_UnmergedProposalNotExecuted(t *testing.T) {
+	// The proposal is only on the pushed branch; the trusted default branch has
+	// no commands yet.
+	pushed := &RepoConfig{Commands: Commands{Test: "go test -race ./..."}}
+	trusted := &RepoConfig{}
+
+	got := EffectiveRepoConfig(pushed, trusted, false)
+
+	if got.Commands.Test != "" {
+		t.Errorf("test = %q, want empty: an unmerged pushed-branch proposal must not execute", got.Commands.Test)
 	}
 }
 

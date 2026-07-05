@@ -142,11 +142,14 @@ func extractCodexOutputSchema(args []string) string {
 	return ""
 }
 
-// filterStructuredToSchema drops fields from structured that are not
-// declared as properties on the top-level object schema at schemaPath.
-// Real codex would not emit undeclared fields under --output-schema, so
-// mirroring that behaviour keeps the fake consistent with no-mistakes'
-// additionalProperties:false validation. schemaPath == "" is a no-op.
+// filterStructuredToSchema reconciles the scenario's structured output with the
+// top-level object schema at schemaPath, mirroring how real codex behaves under
+// --output-schema: undeclared fields are dropped (additionalProperties:false),
+// and every declared property is present, because no-mistakes rewrites the codex
+// schema to mark all properties required (nullable). A declared property the
+// scenario did not set is emitted as null, so a newly-added optional schema
+// field does not fail no-mistakes' codex validation without re-recording.
+// schemaPath == "" is a no-op.
 func filterStructuredToSchema(structured map[string]any, schemaPath string) (map[string]any, error) {
 	if schemaPath == "" {
 		return structured, nil
@@ -164,9 +167,11 @@ func filterStructuredToSchema(structured map[string]any, schemaPath string) (map
 		return structured, nil
 	}
 	filtered := make(map[string]any, len(properties))
-	for key, value := range structured {
-		if _, ok := properties[key]; ok {
+	for key := range properties {
+		if value, ok := structured[key]; ok {
 			filtered[key] = value
+		} else {
+			filtered[key] = nil
 		}
 	}
 	return filtered, nil

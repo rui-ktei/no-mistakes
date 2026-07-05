@@ -139,6 +139,43 @@ func TestFilterStructuredToSchemaKeepsOnlyDeclaredProperties(t *testing.T) {
 	}
 }
 
+func TestFilterStructuredToSchemaFillsMissingDeclaredWithNull(t *testing.T) {
+	// A declared property the scenario did not set is emitted as null,
+	// mirroring codex strict-schema output (all properties present, nullable),
+	// so a new optional schema field does not fail no-mistakes' validation.
+	schemaPath := filepath.Join(t.TempDir(), "schema.json")
+	schema := []byte(`{
+		"type": "object",
+		"properties": {
+			"findings": {"type": "array"},
+			"summary": {"type": "string"},
+			"canonical_command": {"type": "string"}
+		},
+		"required": ["findings", "summary"]
+	}`)
+	if err := os.WriteFile(schemaPath, schema, 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	structured := map[string]any{
+		"findings": []any{},
+		"summary":  "no issues found",
+	}
+
+	got, err := filterStructuredToSchema(structured, schemaPath)
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	want := map[string]any{
+		"findings":          []any{},
+		"summary":           "no issues found",
+		"canonical_command": nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered = %#v\nwant = %#v", got, want)
+	}
+}
+
 func TestFilterStructuredToSchemaNilWhenNoSchema(t *testing.T) {
 	structured := map[string]any{"summary": "ok"}
 	got, err := filterStructuredToSchema(structured, "")

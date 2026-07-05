@@ -61,17 +61,28 @@ type Findings struct {
 	Artifacts      []TestArtifact `json:"artifacts,omitempty"`
 	RiskLevel      string         `json:"risk_level"`
 	RiskRationale  string         `json:"risk_rationale"`
+	// CanonicalCommand is the single reproducible command a discovery agent
+	// settled on for this step (the test command for the test step; the lint
+	// command for the lint step). Empty when the agent used no single canonical
+	// command. Non-executing metadata used by the command-proposal path.
+	CanonicalCommand string `json:"canonical_command,omitempty"`
+	// CanonicalFormatCommand is the reproducible formatter command the lint
+	// discovery agent ran, distinct from CanonicalCommand. Empty when no
+	// distinct formatter ran.
+	CanonicalFormatCommand string `json:"canonical_format_command,omitempty"`
 }
 
 type findingsWire struct {
-	Items          []Finding      `json:"findings"`
-	Legacy         []Finding      `json:"items"`
-	Summary        string         `json:"summary"`
-	Tested         []string       `json:"tested"`
-	TestingSummary string         `json:"testing_summary"`
-	Artifacts      []TestArtifact `json:"artifacts"`
-	RiskLevel      string         `json:"risk_level"`
-	RiskRationale  string         `json:"risk_rationale"`
+	Items                  []Finding      `json:"findings"`
+	Legacy                 []Finding      `json:"items"`
+	Summary                string         `json:"summary"`
+	Tested                 []string       `json:"tested"`
+	TestingSummary         string         `json:"testing_summary"`
+	Artifacts              []TestArtifact `json:"artifacts"`
+	RiskLevel              string         `json:"risk_level"`
+	RiskRationale          string         `json:"risk_rationale"`
+	CanonicalCommand       string         `json:"canonical_command"`
+	CanonicalFormatCommand string         `json:"canonical_format_command"`
 }
 
 // ParseFindingsJSON decodes findings JSON, accepting current and legacy item
@@ -85,7 +96,7 @@ func ParseFindingsJSON(raw string) (Findings, error) {
 	if len(items) == 0 && len(wire.Legacy) > 0 {
 		items = wire.Legacy
 	}
-	return Findings{Items: items, Summary: wire.Summary, Tested: wire.Tested, TestingSummary: wire.TestingSummary, Artifacts: wire.Artifacts, RiskLevel: wire.RiskLevel, RiskRationale: wire.RiskRationale}, nil
+	return Findings{Items: items, Summary: wire.Summary, Tested: wire.Tested, TestingSummary: wire.TestingSummary, Artifacts: wire.Artifacts, RiskLevel: wire.RiskLevel, RiskRationale: wire.RiskRationale, CanonicalCommand: wire.CanonicalCommand, CanonicalFormatCommand: wire.CanonicalFormatCommand}, nil
 }
 
 // NormalizeFindings assigns deterministic IDs to findings that do not have one yet.

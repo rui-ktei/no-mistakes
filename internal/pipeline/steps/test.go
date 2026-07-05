@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kunchenguid/no-mistakes/internal/agent"
+	"github.com/kunchenguid/no-mistakes/internal/config"
 	"github.com/kunchenguid/no-mistakes/internal/git"
 	"github.com/kunchenguid/no-mistakes/internal/pipeline"
 	"github.com/kunchenguid/no-mistakes/internal/types"
@@ -168,6 +169,7 @@ Task:
 - Include a concise "testing_summary" sentence describing what you exercised and the overall result.
 - The "testing_summary" must account for the complete test step: baseline commands that already ran, automated tests, manual or evidence-producing checks, artifacts gathered, and the overall result.
 - Record the exact tests, manual checks, and evidence-producing steps you ran in a "tested" array. Prefer concrete commands or test selectors wrapped in backticks.
+- Set "canonical_command" to the single reproducible command that runs this project's test suite (for example "go test -race ./..." or "npm test"), exactly as a maintainer would paste it into config to run the tests. Leave it empty when you used no single canonical command (ad-hoc, multi-step, or non-reproducible verification).
 - Always include an "artifacts" array. Leave it empty when you produced no reviewer-visible evidence artifacts. Use artifact path for file artifacts, artifact url for externally visible artifacts, and artifact content for short logs or command output that should be shown directly in the PR.
 - If tests fail, determine whether the problem is a real product/code failure, a setup/environment problem you can fix, or a flaky/infrastructure issue.
 - If the issue is setup-related and fixable, fix it and retry the tests.
@@ -226,11 +228,18 @@ Rules:
 		}
 
 		findingsJSON, _ := json.Marshal(findings)
+		var discovered map[config.CommandField]string
+		if testCmd == "" {
+			if cmd := strings.TrimSpace(findings.CanonicalCommand); cmd != "" {
+				discovered = map[config.CommandField]string{config.CommandFieldTest: cmd}
+			}
+		}
 		return &pipeline.StepOutcome{
-			NeedsApproval: needsApproval,
-			AutoFixable:   autoFixable,
-			Findings:      string(findingsJSON),
-			FixSummary:    fixSummary,
+			NeedsApproval:      needsApproval,
+			AutoFixable:        autoFixable,
+			Findings:           string(findingsJSON),
+			FixSummary:         fixSummary,
+			DiscoveredCommands: discovered,
 		}, nil
 	}
 
