@@ -39,6 +39,14 @@ var findingsSchema = json.RawMessage(`{
 		},
 		"testing_summary": {
 			"type": "string"
+		},
+		"canonical_command": {
+			"type": "string",
+			"description": "The single reproducible lint command you ran (e.g. golangci-lint run), or empty if none is confidently canonical"
+		},
+		"canonical_format_command": {
+			"type": "string",
+			"description": "The single reproducible formatter command you ran (e.g. gofmt -w .), distinct from the lint command, or empty if no distinct formatter ran"
 		}
 	},
 	"required": ["findings", "summary"]
@@ -69,6 +77,10 @@ var testFindingsSchema = json.RawMessage(`{
 		},
 		"testing_summary": {
 			"type": "string"
+		},
+		"canonical_command": {
+			"type": "string",
+			"description": "The single reproducible command that runs the project's tests (e.g. go test -race ./...), or empty if you used no single canonical command"
 		},
 		"artifacts": {
 			"type": "array",

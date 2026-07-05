@@ -138,6 +138,7 @@ When `commands.lint` is empty, unresolved findings pause for approval instead of
 Pushes the validated branch to the configured push target.
 
 **Behavior:**
+- Proposes discovered commands first: when [`propose_commands`](/reference/repo-config/#propose_commands) is on and a discovery agent found a canonical `commands.{test,lint,format}` for a field that is unset in the effective config and not already on the branch, it writes them into a dedicated commit on the branch's `.no-mistakes.yaml` (staging only that file). The proposal is inert until merged to the default branch and is surfaced in the PR body; it never executes within this run.
 - If `commands.format` is set, runs it first
 - Stages in-repo test evidence artifacts when `test.evidence.store_in_repo` is enabled and the evidence directory is not ignored by Git
 - Commits any uncommitted agent changes with message `no-mistakes: apply agent fixes`

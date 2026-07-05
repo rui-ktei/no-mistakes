@@ -3,8 +3,10 @@ package steps
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/kunchenguid/no-mistakes/internal/agent"
+	"github.com/kunchenguid/no-mistakes/internal/config"
 	"github.com/kunchenguid/no-mistakes/internal/pipeline"
 	"github.com/kunchenguid/no-mistakes/internal/types"
 )
@@ -37,6 +39,8 @@ Task:
 - Re-run the relevant checks after fixing.
 - Report only unresolved lint, format, or static-analysis issues as structured findings.
 - If everything is clean or fixed, return an empty findings array.
+- Set "canonical_command" to the single reproducible command that lints this project (for example "golangci-lint run" or "npm run lint"), exactly as a maintainer would paste it into config. Leave it empty when you used no single canonical linter command.
+- Set "canonical_format_command" to the single reproducible command that formats this project (for example "gofmt -w ." or "prettier --write ."), distinct from the lint command. Leave it empty when you ran no distinct formatter or it is the same command as the linter.
 
 Rules:
 - Do not run tests or broader behavioral validation.
@@ -82,11 +86,19 @@ Previous lint findings to address:
 
 		needsApproval := hasBlockingFindings(findings.Items)
 		findingsJSON, _ := json.Marshal(findings)
+		discovered := map[config.CommandField]string{}
+		if cmd := strings.TrimSpace(findings.CanonicalCommand); cmd != "" {
+			discovered[config.CommandFieldLint] = cmd
+		}
+		if cmd := strings.TrimSpace(findings.CanonicalFormatCommand); cmd != "" {
+			discovered[config.CommandFieldFormat] = cmd
+		}
 		return &pipeline.StepOutcome{
-			NeedsApproval: needsApproval,
-			AutoFixable:   false,
-			Findings:      string(findingsJSON),
-			FixSummary:    summary,
+			NeedsApproval:      needsApproval,
+			AutoFixable:        false,
+			Findings:           string(findingsJSON),
+			FixSummary:         summary,
+			DiscoveredCommands: discovered,
 		}, nil
 	}
 

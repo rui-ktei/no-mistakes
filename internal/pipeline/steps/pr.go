@@ -274,12 +274,12 @@ func prBodyBudgetPromptSection(bodyLimit int) string {
 // narrative intact. ClampPRBody is the final backstop when even that core
 // overruns (e.g. an unusually long Intent).
 func assemblePRBody(sctx *pipeline.StepContext, whatChanged, riskLine, testingMD, pipelineMD string, bodyLimit int) string {
-	full := prependIntentSection(appendGeneratedSections(whatChanged, riskLine, testingMD, pipelineMD), sctx)
+	full := withProposedCommandsNote(prependIntentSection(appendGeneratedSections(whatChanged, riskLine, testingMD, pipelineMD), sctx), sctx)
 	if bodyLimit <= 0 || scm.PRBodyLen(full) <= bodyLimit {
 		return full
 	}
 	if testingMD != "" {
-		core := prependIntentSection(appendGeneratedSections(whatChanged, riskLine, "", pipelineMD), sctx)
+		core := withProposedCommandsNote(prependIntentSection(appendGeneratedSections(whatChanged, riskLine, "", pipelineMD), sctx), sctx)
 		if scm.PRBodyLen(core) <= bodyLimit {
 			return core
 		}
@@ -296,7 +296,38 @@ func appendGeneratedSections(body, riskLine, testingMD, pipelineMD string) strin
 func buildPRBody(body, riskLine, testingMD, pipelineMD string, sctx *pipeline.StepContext) string {
 	body = stripGeneratedSections(body)
 	body = prependIntentSection(body, sctx)
-	return appendGeneratedSectionsToCleanBody(body, riskLine, testingMD, pipelineMD)
+	return withProposedCommandsNote(appendGeneratedSectionsToCleanBody(body, riskLine, testingMD, pipelineMD), sctx)
+}
+
+// withProposedCommandsNote prepends a "## Proposed Commands" callout when the
+// branch's .no-mistakes.yaml carries command proposals not yet merged to the
+// default branch. Placed at the top so it survives body truncation and is the
+// first thing a reviewer sees. Returns body unchanged when nothing is pending.
+func withProposedCommandsNote(body string, sctx *pipeline.StepContext) string {
+	note := proposedCommandsNote(sctx)
+	if note == "" {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return note
+	}
+	return note + "\n\n" + body
+}
+
+func proposedCommandsNote(sctx *pipeline.StepContext) string {
+	pending := pendingProposedCommands(sctx)
+	if len(pending) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Proposed Commands\n\n")
+	b.WriteString("no-mistakes discovered how to run these checks and proposes pinning them in `.no-mistakes.yaml`. They take effect only after this PR merges to the default branch (commands run only from the trusted default-branch config); until then they stay inert and future runs keep rediscovering. Edit or remove them before merging if they are wrong.\n")
+	for _, field := range commandProposalFields {
+		if cmd, ok := pending[field]; ok {
+			b.WriteString(fmt.Sprintf("\n- `commands.%s`: `%s`", field, cmd))
+		}
+	}
+	return b.String()
 }
 
 func appendGeneratedSectionsToCleanBody(body, riskLine, testingMD, pipelineMD string) string {
@@ -928,7 +959,7 @@ func isGeneratedSectionHeading(line string) bool {
 	heading = strings.ToLower(heading)
 
 	switch heading {
-	case "intent", "risk assessment", "testing", "tests", "pipeline":
+	case "intent", "risk assessment", "testing", "tests", "pipeline", "proposed commands":
 		return true
 	default:
 		return false

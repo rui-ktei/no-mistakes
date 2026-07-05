@@ -54,6 +54,11 @@ type GlobalConfig struct {
 	// every gated repo. A per-repo .no-mistakes.yaml value overrides it when
 	// non-empty. Empty (the default) keeps conventional-commit formatting.
 	TicketPrefixPattern string `yaml:"ticket_prefix_pattern"`
+	// ProposeCommands is the global default for whether a run proposes the
+	// canonical test/lint/format commands a discovery agent used as an edit to
+	// the branch's .no-mistakes.yaml. A repo's trusted default-branch config may
+	// override it. Default true.
+	ProposeCommands bool `yaml:"-"`
 }
 
 // globalConfigRaw is the on-disk YAML representation with duration as string.
@@ -70,6 +75,7 @@ type globalConfigRaw struct {
 	Intent               IntentRaw           `yaml:"intent"`
 	Test                 TestRaw             `yaml:"test"`
 	TicketPrefixPattern  string              `yaml:"ticket_prefix_pattern"`
+	ProposeCommands      *bool               `yaml:"propose_commands"`
 }
 
 // RepoConfig represents .no-mistakes.yaml in a repo root.
@@ -88,6 +94,12 @@ type RepoConfig struct {
 	AutoFix           AutoFixRaw `yaml:"auto_fix"`
 	Intent            IntentRaw  `yaml:"intent"`
 	Test              TestRaw    `yaml:"test"`
+	// ProposeCommands overrides the global propose_commands default for this
+	// repo. Like AllowRepoCommands it is honored ONLY from the trusted
+	// default-branch copy of .no-mistakes.yaml (never the pushed SHA), so a
+	// contributor's branch cannot flip it. nil means "inherit the global
+	// default"; a non-nil value overrides it.
+	ProposeCommands *bool `yaml:"propose_commands"`
 	// TicketPrefixPattern, when set, is a regexp matched against the branch
 	// name; the first match is prepended as "<match>: " to the PR title and to
 	// the commit subjects no-mistakes authors, and conventional-commit title
@@ -98,13 +110,15 @@ type RepoConfig struct {
 
 func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 	type repoConfigRaw struct {
-		Agent             agentList  `yaml:"agent"`
-		Commands          Commands   `yaml:"commands"`
-		IgnorePatterns    []string   `yaml:"ignore_patterns"`
-		AllowRepoCommands bool       `yaml:"allow_repo_commands"`
-		AutoFix           AutoFixRaw `yaml:"auto_fix"`
-		Intent            IntentRaw  `yaml:"intent"`
-		Test              TestRaw    `yaml:"test"`
+		Agent               agentList  `yaml:"agent"`
+		Commands            Commands   `yaml:"commands"`
+		IgnorePatterns      []string   `yaml:"ignore_patterns"`
+		AllowRepoCommands   bool       `yaml:"allow_repo_commands"`
+		ProposeCommands     *bool      `yaml:"propose_commands"`
+		AutoFix             AutoFixRaw `yaml:"auto_fix"`
+		Intent              IntentRaw  `yaml:"intent"`
+		Test                TestRaw    `yaml:"test"`
+		TicketPrefixPattern string     `yaml:"ticket_prefix_pattern"`
 	}
 	var raw repoConfigRaw
 	if err := value.Decode(&raw); err != nil {
@@ -115,9 +129,11 @@ func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 	c.Commands = raw.Commands
 	c.IgnorePatterns = raw.IgnorePatterns
 	c.AllowRepoCommands = raw.AllowRepoCommands
+	c.ProposeCommands = raw.ProposeCommands
 	c.AutoFix = raw.AutoFix
 	c.Intent = raw.Intent
 	c.Test = raw.Test
+	c.TicketPrefixPattern = raw.TicketPrefixPattern
 	return nil
 }
 
@@ -126,6 +142,42 @@ type Commands struct {
 	Lint   string `yaml:"lint"`
 	Test   string `yaml:"test"`
 	Format string `yaml:"format"`
+}
+
+// CommandField names a single code-executing command selector in Commands.
+type CommandField string
+
+const (
+	CommandFieldTest   CommandField = "test"
+	CommandFieldLint   CommandField = "lint"
+	CommandFieldFormat CommandField = "format"
+)
+
+// Get returns the value of the named command field.
+func (c Commands) Get(field CommandField) string {
+	switch field {
+	case CommandFieldTest:
+		return c.Test
+	case CommandFieldLint:
+		return c.Lint
+	case CommandFieldFormat:
+		return c.Format
+	default:
+		return ""
+	}
+}
+
+// UnsetCommandFields returns the command fields that are empty in c, in a
+// stable order. The command-proposal path uses this to answer "which commands
+// could a discovered value be proposed for" against the effective config.
+func (c Commands) UnsetCommandFields() []CommandField {
+	var unset []CommandField
+	for _, field := range []CommandField{CommandFieldTest, CommandFieldLint, CommandFieldFormat} {
+		if strings.TrimSpace(c.Get(field)) == "" {
+			unset = append(unset, field)
+		}
+	}
+	return unset
 }
 
 // AutoFixRaw is the YAML representation of auto-fix config.
@@ -167,6 +219,7 @@ type Config struct {
 	Intent               Intent
 	Test                 Test
 	TicketPrefixPattern  string
+	ProposeCommands      bool
 }
 
 // TestRaw is the YAML representation of test-step settings.
@@ -287,6 +340,15 @@ ci_timeout: "168h"
 # Log level for daemon output
 # Options: debug, info, warn, error
 log_level: info
+
+# When a run has no configured commands.{test,lint,format}, a discovery agent
+# finds how to test/lint/format the project. With propose_commands on,
+# no-mistakes proposes the canonical command it used as an edit to the branch's
+# .no-mistakes.yaml, surfaced in the PR. The proposed command is inert until a
+# human merges it to the default branch (commands are executed only from the
+# trusted default-branch config), which then skips rediscovery on future runs.
+# A repo's default-branch .no-mistakes.yaml may override this.
+propose_commands: true
 
 # Work-item title/commit convention. When set to a regexp, no-mistakes matches
 # it against the branch name and prepends the first match (e.g. "WEB-12345: ")
@@ -658,10 +720,11 @@ func EnsureDefaultGlobalConfig(path string) {
 // LoadGlobal reads global config from path. Returns defaults if file doesn't exist.
 func LoadGlobal(path string) (*GlobalConfig, error) {
 	cfg := &GlobalConfig{
-		Agent:     types.AgentAuto,
-		Agents:    []types.AgentName{types.AgentAuto},
-		CITimeout: DefaultCITimeout,
-		LogLevel:  "info",
+		Agent:           types.AgentAuto,
+		Agents:          []types.AgentName{types.AgentAuto},
+		CITimeout:       DefaultCITimeout,
+		LogLevel:        "info",
+		ProposeCommands: true,
 	}
 
 	data, err := os.ReadFile(path)
@@ -719,6 +782,9 @@ func LoadGlobal(path string) (*GlobalConfig, error) {
 	cfg.Intent = raw.Intent
 	cfg.Test = raw.Test
 	cfg.TicketPrefixPattern = raw.TicketPrefixPattern
+	if raw.ProposeCommands != nil {
+		cfg.ProposeCommands = *raw.ProposeCommands
+	}
 
 	return cfg, nil
 }
@@ -803,6 +869,14 @@ func EffectiveRepoConfig(pushed, trusted *RepoConfig, allowRepoCommands bool) *R
 		pushed = &RepoConfig{}
 	}
 	effective := *pushed
+	// propose_commands is scoped like allow_repo_commands: honored only from the
+	// trusted default-branch copy, never the pushed branch. nil leaves the
+	// global default in force.
+	if trusted != nil {
+		effective.ProposeCommands = trusted.ProposeCommands
+	} else {
+		effective.ProposeCommands = nil
+	}
 	if allowRepoCommands {
 		return &effective
 	}
@@ -975,8 +1049,12 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		Intent:               intent,
 		Test:                 test,
 		TicketPrefixPattern:  global.TicketPrefixPattern,
+		ProposeCommands:      global.ProposeCommands,
 	}
 
+	if repo.ProposeCommands != nil {
+		cfg.ProposeCommands = *repo.ProposeCommands
+	}
 	if repo.Agent != "" {
 		cfg.Agent = repo.Agent
 		cfg.Agents = copyAgents(repo.Agents)

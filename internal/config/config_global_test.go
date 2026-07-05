@@ -377,6 +377,9 @@ func TestDefaultConfigYAML_MatchesGoDefaults(t *testing.T) {
 	if raw.LogLevel != "info" {
 		t.Errorf("YAML log_level = %q, Go default = %q", raw.LogLevel, "info")
 	}
+	if raw.ProposeCommands == nil || !*raw.ProposeCommands {
+		t.Errorf("YAML propose_commands = %v, Go default = true", raw.ProposeCommands)
+	}
 	defaults := autoFixDefaults()
 	if raw.AutoFix.Lint == nil || *raw.AutoFix.Lint != defaults.Lint {
 		t.Errorf("YAML auto_fix.lint = %v, Go default = %d", raw.AutoFix.Lint, defaults.Lint)

@@ -92,7 +92,7 @@ Explicit test command. Run via the platform shell - `sh -c` on POSIX, `cmd.exe /
 | Default | Empty (agent auto-detects tests and evidence checks) |
 
 When set, the test step runs this exact command first as the baseline and checks the exit code.
-When empty, the agent detects and runs relevant tests itself.
+When empty, the agent detects and runs relevant tests itself, and - unless [`propose_commands`](#propose_commands) is disabled - proposes the canonical command it used as an edit to this file (see [propose_commands](#propose_commands)).
 When user intent is available, the agent may still run after a successful baseline command to gather evidence-oriented validation.
 
 ### commands.lint
@@ -105,7 +105,7 @@ Explicit lint command. Run via the platform shell - `sh -c` on POSIX, `cmd.exe /
 | Default | Empty (agent auto-detects) |
 
 When set, the lint step runs this exact command and checks the exit code.
-When empty, the agent detects relevant linters and formatters, applies safe fixes, reruns the relevant checks, commits any agent changes, and reports only unresolved issues.
+When empty, the agent detects relevant linters and formatters, applies safe fixes, reruns the relevant checks, commits any agent changes, and reports only unresolved issues. Unless [`propose_commands`](#propose_commands) is disabled, it also proposes the canonical lint command (and the canonical `commands.format` command, when it ran a distinct formatter) as an edit to this file.
 
 ### commands.format
 
@@ -117,6 +117,22 @@ Formatter command run before the push step commits agent fixes.
 | Default | Empty (no separate push-step formatter) |
 
 This does not prevent empty `commands.lint` from detecting and running formatters during the lint step.
+When empty, the lint discovery agent reports the canonical formatter it ran, which - unless [`propose_commands`](#propose_commands) is disabled - is proposed as an edit to this file.
+
+### propose_commands
+
+Whether a run proposes the canonical `commands.{test,lint,format}` a discovery agent used as an edit to this file, so that a human merge to your default branch promotes them to trusted, executed config and future runs skip rediscovery.
+
+| | |
+|---|---|
+| Type | `bool` |
+| Default | `true` (inherits the [global `propose_commands`](/reference/global-config/#propose_commands)) |
+
+When a run has no configured command for a field, a discovery agent works out how to test, lint, or format the project. With this on, the run writes the single canonical command it settled on into a dedicated commit on the branch's `.no-mistakes.yaml` (only for fields that are currently unset and not already proposed on the branch), and the pull request notes the proposal.
+
+The proposed command is **inert until you merge it to the default branch**: `commands.*` are read only from the trusted default-branch copy, so the discovering run never executes the proposal, and later runs keep rediscovering until the merge lands. Review the proposed command in the PR and edit or drop it before merging if it is wrong; the merged value is what future runs execute. This never enables [`allow_repo_commands`](#allow_repo_commands) and never widens the trust boundary.
+
+Like `allow_repo_commands`, this switch is read only from the trusted default-branch copy of `.no-mistakes.yaml`, so a contributor cannot flip it from a pushed branch. Set it to `false` to turn the behavior off for a repo.
 
 ### Command process lifetime
 
