@@ -25,6 +25,8 @@ Testing prompts also ask agents to remove transient working-tree artifacts they 
 - Use an ordered fallback list when you prefer one agent but want no-mistakes to try another if the first process is unavailable.
 - Set explicit `commands.test` and `commands.lint` if you want deterministic baseline command execution regardless of agent choice.
 
+When you leave a command empty, the run also proposes the canonical command the discovery agent used as an edit to the branch's `.no-mistakes.yaml`, surfaced in the PR; merging it to the default branch promotes it to trusted, executed config so future runs skip rediscovery. See [`propose_commands`](/no-mistakes/reference/repo-config/#propose_commands).
+
 That last point matters: the agent helps fill in gaps, but explicit repo
 commands are still the strongest way to make the baseline gate predictable.
 When user intent is available, the test step may still invoke the configured agent after `commands.test` succeeds to gather evidence that demonstrates the change.

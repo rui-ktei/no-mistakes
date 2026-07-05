@@ -225,7 +225,7 @@ Global default for whether a run proposes the canonical `commands.{test,lint,for
 | Type | `bool` |
 | Default | `true` |
 
-The proposal is a dedicated branch commit surfaced in the PR; it is inert until merged to the default branch (`commands.*` are read only from the trusted default branch), so it never executes within the discovering run and never widens the trust boundary. A repo's default-branch `.no-mistakes.yaml` may override this via [`propose_commands`](/reference/repo-config/#propose_commands) (read only from the trusted copy, like `allow_repo_commands`). Set to `false` to turn it off everywhere.
+The proposal is a dedicated branch commit surfaced in the PR; it is inert until merged to the default branch (`commands.*` are read only from the trusted default branch), so it never executes within the discovering run and never widens the trust boundary. A repo's default-branch `.no-mistakes.yaml` may override this via [`propose_commands`](/no-mistakes/reference/repo-config/#propose_commands) (read only from the trusted copy, like `allow_repo_commands`). Set to `false` to turn it off everywhere.
 
 ### ticket_prefix_pattern
 

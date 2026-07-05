@@ -126,7 +126,7 @@ Whether a run proposes the canonical `commands.{test,lint,format}` a discovery a
 | | |
 |---|---|
 | Type | `bool` |
-| Default | `true` (inherits the [global `propose_commands`](/reference/global-config/#propose_commands)) |
+| Default | `true` (inherits the [global `propose_commands`](/no-mistakes/reference/global-config/#propose_commands)) |
 
 When a run has no configured command for a field, a discovery agent works out how to test, lint, or format the project. With this on, the run writes the single canonical command it settled on into a dedicated commit on the branch's `.no-mistakes.yaml` (only for fields that are currently unset and not already proposed on the branch), and the pull request notes the proposal.
 

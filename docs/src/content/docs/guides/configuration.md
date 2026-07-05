@@ -179,11 +179,13 @@ See [Repo Config Reference](/no-mistakes/reference/repo-config/) for the full fi
 - `test.evidence` from the repo config overlays global test evidence settings. Fields not set in the repo config fall through to the global default.
 - A non-empty repo `ticket_prefix_pattern` overrides the global value; when both are empty, PR titles and authored commits use conventional-commit formatting.
 - `commands` and `ignore_patterns` are repo-only fields.
+- A non-nil repo `propose_commands` overrides the global value, but only from the trusted default-branch copy of `.no-mistakes.yaml` (like `allow_repo_commands`); a pushed branch cannot flip it.
 - `ci_timeout` and `auto_fix.ci` are the canonical keys; `babysit_timeout` and `auto_fix.babysit` are still accepted as legacy aliases.
 - If `commands.test` is set, the test step runs it first as the baseline; when user intent is available, the agent may still run afterward to gather evidence-oriented validation.
 - If `commands.test` is empty, the agent detects and runs relevant tests itself.
 - If `commands.lint` is empty, the agent detects relevant linters and formatters, applies safe fixes, verifies them, commits any agent changes, and reports only unresolved issues.
 - If `commands.format` is empty, no separate push-step formatter is run automatically.
+- When any of `commands.{test,lint,format}` is empty, the run proposes the canonical command the discovery agent used as an edit to the branch's `.no-mistakes.yaml`, surfaced in the PR; the proposal is inert until you merge it to the default branch, and future runs skip rediscovery once it lands. Turn this off with `propose_commands: false` (global or trusted default-branch repo config). See [`propose_commands`](/no-mistakes/reference/repo-config/#propose_commands).
 - Configured commands are step-scoped; no-mistakes terminates child processes they leave behind when the command exits, fails, or is cancelled.
 
 The practical implication is simple: explicit commands give you deterministic
