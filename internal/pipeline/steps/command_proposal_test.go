@@ -16,7 +16,10 @@ func proposerContext(t *testing.T, cmds config.Commands, discovered map[config.C
 	gitCmd(t, dir, "checkout", "--detach", headSHA)
 	sctx := newTestContextWithDBRecords(t, &mockAgent{name: "test"}, dir, baseSHA, headSHA, cmds)
 	sctx.Config.ProposeCommands = true
-	sctx.Scratch = &pipeline.RunScratch{DiscoveredCommands: discovered}
+	sctx.Shared = &pipeline.RunShared{}
+	for field, command := range discovered {
+		sctx.Shared.RecordDiscoveredCommand(field, command)
+	}
 	return sctx
 }
 

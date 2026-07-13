@@ -49,37 +49,25 @@ type StepContext struct {
 	StepResultID string
 	Env          []string // extra environment variables for subprocesses (used in tests)
 	// UserIntent is a short, possibly-empty summary of what the change author
-	// was trying to accomplish, inferred from local agent transcripts. It's
-	// surfaced in step prompts so agents have context beyond the diff.
+	// was trying to accomplish. It's surfaced in step prompts so agents have
+	// context beyond the diff. Its authority depends on IntentSource: an
+	// explicit `--intent` is the author's own goal statement, while an
+	// inferred summary comes from a local agent transcript.
 	UserIntent string
-	// Scratch is in-memory, non-persisted state shared across the steps of a
-	// single run. The executor creates one per run and threads the same pointer
-	// into every step's context, so a later step can read what an earlier step
-	// discovered (e.g. the command-proposal path reads the canonical commands
-	// the test/lint discovery agents reported).
-	Scratch *RunScratch
-}
-
-// RunScratch is per-run, in-memory state shared across steps. It is never
-// persisted; it exists only to pass discovery results forward within a run.
-type RunScratch struct {
-	// DiscoveredCommands maps a commands.* field name to the canonical command a
-	// discovery agent reported for it this run. Populated by the test and lint
-	// steps (only for fields unset in the effective config); consumed by the
-	// command-proposal path in the push step.
-	DiscoveredCommands map[config.CommandField]string
-}
-
-// RecordDiscoveredCommand stores a non-empty canonical command for a field.
-// Safe to call on a nil scratch (no-op) so steps need not nil-check.
-func (s *RunScratch) RecordDiscoveredCommand(field config.CommandField, command string) {
-	if s == nil || strings.TrimSpace(command) == "" {
-		return
-	}
-	if s.DiscoveredCommands == nil {
-		s.DiscoveredCommands = map[config.CommandField]string{}
-	}
-	s.DiscoveredCommands[field] = command
+	// IntentSource records the provenance of UserIntent so steps can weigh
+	// its authority. db.RunIntentSourceAgent ("agent") means the driving
+	// agent supplied it explicitly via `axi run --intent` (authoritative
+	// acceptance criteria); an agent name ("claude", "codex", ...) means it
+	// was inferred from a transcript (a hint). Empty when no intent exists.
+	IntentSource string
+	// Sessions manages the run's durable review-loop agent sessions
+	// (reviewer and fixer roles). nil runs every invocation cold.
+	Sessions *RunSessions
+	// Shared carries in-memory run-scoped results one step hands to a later
+	// step in the same run (e.g. the combined document+lint pass and the
+	// discovered-commands the test/lint steps report to the push step's
+	// command-proposal path).
+	Shared *RunShared
 }
 
 // IntegrationBranch returns the effective base branch for this run, applying
@@ -91,6 +79,17 @@ func (s *StepContext) IntegrationBranch() string {
 		runOverride = s.Run.BaseBranch
 	}
 	return ResolveIntegrationBranch(runOverride, s.Repo)
+}
+
+// RunAgentSession executes one turn of a durable review-loop role session,
+// running cold when sessions are unavailable. Only the review step's
+// reviewer/fixer turns use this; every other agent invocation goes through
+// sctx.Agent.Run directly and stays session-isolated.
+func (sctx *StepContext) RunAgentSession(role SessionRole, opts agent.RunOpts) (*agent.Result, error) {
+	if sctx.Sessions == nil {
+		return sctx.Agent.Run(sctx.Ctx, opts)
+	}
+	return sctx.Sessions.Run(sctx.Ctx, sctx.Agent, role, opts, sctx.Log)
 }
 
 // StepOutcome is the result of executing a pipeline step.

@@ -34,11 +34,12 @@ func proposeDiscoveredCommands(sctx *pipeline.StepContext) error {
 	if sctx.Config == nil || !sctx.Config.ProposeCommands {
 		return nil
 	}
-	if sctx.Scratch == nil || len(sctx.Scratch.DiscoveredCommands) == 0 {
+	discovered := sctx.Shared.DiscoveredCommands()
+	if len(discovered) == 0 {
 		return nil
 	}
 
-	updates, err := proposableCommands(sctx)
+	updates, err := proposableCommands(sctx, discovered)
 	if err != nil {
 		return err
 	}
@@ -62,7 +63,7 @@ func proposeDiscoveredCommands(sctx *pipeline.StepContext) error {
 // working-tree .no-mistakes.yaml (the latter keeps the proposer idempotent
 // across reruns of the same branch, since commands are read from the default
 // branch, not the branch file).
-func proposableCommands(sctx *pipeline.StepContext) (map[config.CommandField]string, error) {
+func proposableCommands(sctx *pipeline.StepContext, discovered map[config.CommandField]string) (map[config.CommandField]string, error) {
 	branchCfg, err := config.LoadRepo(sctx.WorkDir)
 	if err != nil {
 		return nil, fmt.Errorf("read branch config for command proposal: %w", err)
@@ -70,7 +71,7 @@ func proposableCommands(sctx *pipeline.StepContext) (map[config.CommandField]str
 	effective := sctx.Config.Commands
 	updates := map[config.CommandField]string{}
 	for _, field := range commandProposalFields {
-		cmd := strings.TrimSpace(sctx.Scratch.DiscoveredCommands[field])
+		cmd := strings.TrimSpace(discovered[field])
 		if cmd == "" {
 			continue
 		}

@@ -71,7 +71,11 @@ func newAxiRunCmd() *cobra.Command {
 			"accepting the result) until a decision point or outcome.\n\n" +
 			"--intent is required when starting a new run: pass what the user set out\n" +
 			"to accomplish (the goal behind the change, not a description of the diff)\n" +
-			"so no-mistakes uses it directly instead of inferring it from transcripts.",
+			"so no-mistakes uses it directly instead of inferring it from transcripts.\n\n" +
+			"The calling agent drives AXI approval gates but does not become the pipeline\n" +
+			"agent. The daemon requires a supported native agent binary or a configured\n" +
+			"ACP target through acpx, and fails before the first step when none can run.\n\n" +
+			preserveGateFixCommitsGuidance,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -99,7 +103,7 @@ func newAxiRunCmd() *cobra.Command {
 
 func runAxiRun(cmd *cobra.Command, autoYes bool, skipSteps []types.StepName, intent, baseBranch string) error {
 	ctx := cmd.Context()
-	env, err := openAxiEnv(true)
+	env, err := openAxiRunEnv()
 	if err != nil {
 		return emitError(cmd, 1, err.Error(), repoInitHelp(err)...)
 	}
@@ -121,6 +125,9 @@ func runAxiRun(cmd *cobra.Command, autoYes bool, skipSteps []types.StepName, int
 
 	runID := activeRunID(env, branch, headSHA)
 	if runID == "" {
+		if err := configErrorForFreshAxiRun(env, runID); err != nil {
+			return emitError(cmd, 1, err.Error(), repoInitHelp(err)...)
+		}
 		// Intent is mandatory when starting a run: the agent driving this knows
 		// the change's intent, so we take it directly instead of inferring it
 		// from transcripts. Reattaching to an in-flight run does not need it.
@@ -148,6 +155,13 @@ func runAxiRun(cmd *cobra.Command, autoYes bool, skipSteps []types.StepName, int
 		return emitError(cmd, 1, fmt.Sprintf("drive run: %v", err))
 	}
 	return renderDriveResult(cmd, run, ciReady)
+}
+
+func configErrorForFreshAxiRun(env *axiEnv, runID string) error {
+	if runID != "" {
+		return nil
+	}
+	return env.globalConfigErr
 }
 
 // activeRunID returns the ID of a non-terminal run for branch and head, or "" if none.
@@ -215,9 +229,15 @@ func triggerRun(ctx context.Context, env *axiEnv, branch, headSHA string, skipSt
 	if opt := formatBasePushOption(baseBranch); opt != "" {
 		pushOptions = append(pushOptions, opt)
 	}
+	priorRunIDs, err := runIDsForHead(env.client, env.repo.ID, branch, headSHA)
+	if err != nil {
+		// An active run can still be found below. Without a baseline, however,
+		// a matching terminal run may predate this push, so do not attach to it.
+		priorRunIDs = nil
+	}
 	pushErr := git.PushWithOptions(ctx, ".", gate.RemoteName, "refs/heads/"+branch, "", false, pushOptions)
 
-	if run, _ := waitForActiveRunForHead(ctx, env.client, env.repo.ID, branch, headSHA, triggerWaitTimeout); run != nil {
+	if run, _ := waitForTriggeredRunForHead(ctx, env.client, env.repo.ID, branch, headSHA, priorRunIDs, triggerWaitTimeout); run != nil {
 		return run.ID, nil
 	}
 	if !shouldRerunAfterNoActiveRun(pushErr) {
@@ -233,7 +253,36 @@ func triggerRun(ctx context.Context, env *axiEnv, branch, headSHA string, skipSt
 	return rr.RunID, nil
 }
 
-func waitForActiveRunForHead(ctx context.Context, client *ipc.Client, repoID, branch, headSHA string, timeout time.Duration) (*ipc.RunInfo, error) {
+// runIDsForHead snapshots the run IDs already present for a repo's exact branch
+// and head SHA before a push, so waitForTriggeredRunForHead can tell a run this
+// push created apart from a terminal run an earlier push left behind. Scoping to
+// the head keeps this lookup, and the poll that reuses the same method, bounded
+// to the handful of runs for one head rather than the repo's whole history.
+func runIDsForHead(client *ipc.Client, repoID, branch, headSHA string) (map[string]struct{}, error) {
+	runs, err := runsForHead(client, repoID, branch, headSHA)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]struct{}, len(runs))
+	for _, run := range runs {
+		ids[run.ID] = struct{}{}
+	}
+	return ids, nil
+}
+
+func runsForHead(client *ipc.Client, repoID, branch, headSHA string) ([]ipc.RunInfo, error) {
+	var result ipc.GetRunsResult
+	if err := client.Call(ipc.MethodGetRunsForHead, &ipc.GetRunsForHeadParams{RepoID: repoID, Branch: branch, HeadSHA: headSHA}, &result); err != nil {
+		return nil, err
+	}
+	return result.Runs, nil
+}
+
+// waitForTriggeredRunForHead waits for the run created by this trigger. The
+// active-run lookup handles normal execution; the head lookup catches a run
+// that fails before it can be observed as active. priorRunIDs prevents an
+// up-to-date push from attaching to a terminal run created by an earlier one.
+func waitForTriggeredRunForHead(ctx context.Context, client *ipc.Client, repoID, branch, headSHA string, priorRunIDs map[string]struct{}, timeout time.Duration) (*ipc.RunInfo, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
@@ -250,6 +299,19 @@ func waitForActiveRunForHead(ctx context.Context, client *ipc.Client, repoID, br
 		}
 		if run := activeRunInfoForHead(result.Run, headSHA); run != nil {
 			return run, nil
+		}
+		if priorRunIDs != nil {
+			runs, err := runsForHead(client, repoID, branch, headSHA)
+			if err != nil {
+				return nil, err
+			}
+			for i := range runs {
+				run := &runs[i]
+				if _, existed := priorRunIDs[run.ID]; !existed {
+					return run, nil
+				}
+				break
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -512,9 +574,11 @@ func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error
 		return nil
 	}
 
+	help := []string{preserveGateFixCommitsGuidance}
 	if rv.PRURL != "" {
-		fields = append(fields, toon.Field{Key: "help", Value: []string{fmt.Sprintf("Open the PR: %s", rv.PRURL)}})
+		help = append([]string{fmt.Sprintf("Open the PR: %s", rv.PRURL)}, help...)
 	}
+	fields = append(fields, toon.Field{Key: "help", Value: help})
 	emitDoc(cmd, fields...)
 	return &exitError{code: 1}
 }
@@ -535,6 +599,7 @@ func successReportHelp(fixes []fixRow) []string {
 	if len(fixes) > 0 {
 		help = append(help, "The pipeline fixed findings the original change missed (see `fixes`) - acknowledge the misses and list each fix so the user can review them.")
 	}
+	help = append(help, preserveGateFixCommitsGuidance)
 	return help
 }
 
@@ -546,7 +611,8 @@ func newAxiRespondCmd() *cobra.Command {
 		Use:   "respond",
 		Short: "Answer the current approval gate and continue the run",
 		Long: "Sends approve/fix/skip for the step currently awaiting approval, then\n" +
-			"blocks until the next gate, CI-ready decision point, or final outcome.",
+			"blocks until the next gate, CI-ready decision point, or final outcome.\n\n" +
+			preserveGateFixCommitsGuidance,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -598,7 +664,7 @@ func runAxiRespond(cmd *cobra.Command, ra respondArgs) error {
 			"Valid actions: approve, fix, skip")
 	}
 
-	env, err := openAxiEnv(true)
+	env, err := openAxiDaemonEnv()
 	if err != nil {
 		return emitError(cmd, 1, err.Error(), repoInitHelp(err)...)
 	}
@@ -614,7 +680,7 @@ func runAxiRespond(cmd *cobra.Command, ra respondArgs) error {
 	}
 	if active.Run == nil {
 		return emitError(cmd, 1, "no active run to respond to",
-			"Run `no-mistakes axi run` to start one")
+			"Run `no-mistakes axi run --intent \"...\"` to start one")
 	}
 	runID := active.Run.ID
 
@@ -700,7 +766,8 @@ func newAxiAbortCmd() *cobra.Command {
 			"While a run is active, do NOT abort (or rerun) to go fix a finding\n" +
 			"yourself - that discards the pipeline's in-flight work and forces a full\n" +
 			"re-validation. abort and rerun are for between runs (after a failed or\n" +
-			"cancelled outcome), never to circumvent a gate.",
+			"cancelled outcome), never to circumvent a gate.\n\n" +
+			preserveGateFixCommitsGuidance,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -720,7 +787,7 @@ func runAxiAbort(cmd *cobra.Command, runID string) error {
 	}
 
 	ctx := cmd.Context()
-	env, err := openAxiEnv(true)
+	env, err := openAxiDaemonEnv()
 	if err != nil {
 		return emitError(cmd, 1, err.Error(), repoInitHelp(err)...)
 	}

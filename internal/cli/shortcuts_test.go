@@ -199,12 +199,11 @@ func TestShortcutsRecordOwnTelemetrySurface(t *testing.T) {
 
 	cases := []struct {
 		args       []string
-		path       string
 		command    string
 		notSurface string
 	}{
-		{[]string{"st"}, "/st", "st", "axi-status"},
-		{[]string{"lg", "--step", "review"}, "/lg", "lg", "axi-logs"},
+		{[]string{"st"}, "st", "axi-status"},
+		{[]string{"lg", "--step", "review"}, "lg", "axi-logs"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.command, func(t *testing.T) {
@@ -214,9 +213,8 @@ func TestShortcutsRecordOwnTelemetrySurface(t *testing.T) {
 
 			_, _ = executeCmd(tc.args...)
 
-			if recorder.find("pageview", "path", tc.path) == nil {
-				t.Fatalf("expected %s pageview", tc.path)
-			}
+			// Shortcuts are read surfaces: like `axi status`/`axi logs` they emit a
+			// sampled command event under their own surface name and no pageview.
 			if recorder.find("command", "command", tc.command) == nil {
 				t.Fatalf("expected %s command event", tc.command)
 			}
