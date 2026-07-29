@@ -155,37 +155,24 @@ func (i Inspector) activeAgentSteps() ([]activeAgentStep, error) {
 	if i.DB == nil {
 		return nil, nil
 	}
-	runs, err := i.DB.GetActiveRuns()
+	// Both reads use the narrow identity projections: this classifier runs
+	// against a read-only, deliberately unmigrated database, so a full-row read
+	// would fail on any schema older than the running binary.
+	runs, err := i.DB.GetActiveRunIdentities()
 	if err != nil {
 		return nil, fmt.Errorf("gate execution context: list active runs: %w", err)
 	}
 	var out []activeAgentStep
 	for _, run := range runs {
-		steps, err := i.DB.GetStepsByRun(run.ID)
+		steps, err := i.DB.GetActiveStepIdentitiesByRun(run.ID)
 		if err != nil {
 			return nil, fmt.Errorf("gate execution context: list steps for active run: %w", err)
 		}
 		for _, step := range steps {
-			if !activeStepStatus(step.Status) {
-				continue
-			}
-			pid := 0
-			if step.AgentPID != nil {
-				pid = *step.AgentPID
-			}
-			out = append(out, activeAgentStep{runID: run.ID, repoID: run.RepoID, phase: step.StepName, agentPID: pid})
+			out = append(out, activeAgentStep{runID: run.ID, repoID: run.RepoID, phase: step.StepName, agentPID: step.AgentPID})
 		}
 	}
 	return out, nil
-}
-
-func activeStepStatus(status types.StepStatus) bool {
-	switch status {
-	case types.StepStatusRunning, types.StepStatusFixing, types.StepStatusAwaitingApproval, types.StepStatusFixReview:
-		return true
-	default:
-		return false
-	}
 }
 
 func (i Inspector) registeredManagedCommonDir(commonDir string) (string, bool, error) {
