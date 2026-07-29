@@ -932,6 +932,15 @@ func TestWaitForDaemonStopNeverKillsOwnPIDWhenHealthCheckOnlyErrors(t *testing.T
 	}
 }
 
+// TestWaitForDaemonStopDoesNotTreatHealthCheckErrorsAsStopped pins that an
+// unreachable health check is never by itself read as a stopped daemon.
+//
+// The recorded process is explicitly still running here. That matters: a health
+// check that only errors is inconclusive, so the stop is decided by whether the
+// recorded process is alive. With it alive the daemon may well be serving, and
+// waitForDaemonStop must neither claim success nor delete its artifacts. The
+// dead-process case is the opposite conclusion and is owned by
+// TestWaitForDaemonStop_TreatsDeadRecordedPIDAsStopped.
 func TestWaitForDaemonStopDoesNotTreatHealthCheckErrorsAsStopped(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "dtest")
 	if err != nil {
@@ -954,8 +963,11 @@ func TestWaitForDaemonStopDoesNotTreatHealthCheckErrorsAsStopped(t *testing.T) {
 	daemonHealthCheck = func(*paths.Paths) (bool, error) {
 		return false, errors.New("transient ipc failure")
 	}
+	originalProcessRunning := daemonProcessRunning
+	daemonProcessRunning = func(int) (bool, error) { return true, nil }
 	defer func() {
 		daemonHealthCheck = originalHealthCheck
+		daemonProcessRunning = originalProcessRunning
 	}()
 
 	started := time.Now()

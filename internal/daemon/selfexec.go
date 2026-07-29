@@ -609,6 +609,27 @@ func stopDetachedDaemonByPID(p *paths.Paths) error {
 	return fmt.Errorf("daemon pid %d still running after kill", pid)
 }
 
+// recordedDaemonProcessGone reports whether the pid file names a process that is
+// no longer running, which is positive proof the daemon has stopped.
+//
+// It exists because the health check cannot supply that proof once a daemon dies
+// without cleaning up: the socket file survives on disk, so probing it yields a
+// dial error rather than a clean "not alive", and every caller that waits for
+// `err == nil && !alive` waits forever. Process liveness has no such ambiguity.
+//
+// It deliberately answers false whenever liveness is anything but conclusively
+// dead - unreadable pid file, unusable pid, a liveness probe that itself failed,
+// or our own pid (an in-process daemon under a test harness, not a corpse) - so
+// this can only ever short-circuit a stop that had nothing left to kill.
+func recordedDaemonProcessGone(p *paths.Paths) bool {
+	pid, err := ReadPID(p)
+	if err != nil || pid <= 0 || pid == os.Getpid() {
+		return false
+	}
+	running, err := daemonProcessRunning(pid)
+	return err == nil && !running
+}
+
 func validateDaemonPIDFallback(p *paths.Paths, pid int) error {
 	if pid <= 0 {
 		return fmt.Errorf("invalid daemon pid %d", pid)
@@ -700,10 +721,21 @@ func waitForDaemonStop(p *paths.Paths) error {
 	deadline := time.Now().Add(daemonStopTimeout())
 	for time.Now().Before(deadline) {
 		alive, err := daemonHealthCheck(p)
-		if err == nil && !alive {
-			cleanupDaemonArtifacts(p)
-			slog.Info("daemon stopped gracefully")
-			return nil
+		if !alive {
+			if err == nil {
+				cleanupDaemonArtifacts(p)
+				slog.Info("daemon stopped gracefully")
+				return nil
+			}
+			// The health check could not reach the daemon. That alone is never
+			// proof of a stop, but a recorded process that no longer exists is.
+			// Requiring both keeps a daemon that still answers its health check
+			// untouched however stale its pid file looks.
+			if recordedDaemonProcessGone(p) {
+				cleanupDaemonArtifacts(p)
+				slog.Info("daemon process already gone")
+				return nil
+			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
