@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/kunchenguid/no-mistakes/internal/agent"
@@ -9,6 +10,8 @@ import (
 	"github.com/kunchenguid/no-mistakes/internal/db"
 	"github.com/kunchenguid/no-mistakes/internal/types"
 )
+
+var ErrFatalGateReconciliation = errors.New("fatal gate reconciliation")
 
 // ResolveIntegrationBranch returns the branch the pipeline rebases, reviews,
 // and opens PRs against. Precedence: the per-run override, then the repo's
@@ -106,6 +109,10 @@ type StepOutcome struct {
 	// mode so the executor can persist it on the round record and later
 	// rounds can reference what was previously attempted.
 	FixSummary string
+	// ReviewApprovedHeadSHA is set only by a successfully executed full review
+	// round. The executor durably records it only when the review step actually
+	// completes, never while that outcome is parked or after a failed round.
+	ReviewApprovedHeadSHA string
 
 	// DiscoveredCommands carries the canonical command(s) a discovery agent
 	// reported this round, keyed by commands.* field. The executor merges these
@@ -128,4 +135,13 @@ type Step interface {
 	// A step that returns NeedsApproval=true will pause the pipeline
 	// until the user responds with an approval action.
 	Execute(sctx *StepContext) (*StepOutcome, error)
+}
+
+// ApprovalGateReconciler is implemented by a step whose parked approval gate
+// can become obsolete when an external source of truth changes. The executor
+// invokes it with a bounded context while also waiting for an approval. A true
+// result completes the step through the normal success path; false or an error
+// leaves the gate parked. Implementations must be read-only and fail closed.
+type ApprovalGateReconciler interface {
+	ReconcileApprovalGate(sctx *StepContext) (resolved bool, err error)
 }

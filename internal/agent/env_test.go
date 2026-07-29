@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -71,6 +72,44 @@ func TestGitSafeEnv_StampsGateRoleMarker(t *testing.T) {
 // confused parent) cannot pre-empt the marker with its own ambient value: the
 // stamp is appended last, and exec resolves duplicate keys to the last
 // occurrence.
+func TestEverySupportedAdapterPropagatesGateMarkerThroughCanonicalEnv(t *testing.T) {
+	// Native one-shot adapters own their command in the named file. OpenCode
+	// and Rovo Dev use the shared managed-server launcher, while Cursor and
+	// arbitrary ACP targets use acpx. Every route must stay on agentEnv (the
+	// gitSafeEnv base plus the daemon's per-run overrides) so marker
+	// propagation cannot drift adapter by adapter.
+	owners := map[string]string{
+		"claude":                          "claude.go",
+		"codex":                           "codex.go",
+		"copilot":                         "copilot.go",
+		"pi":                              "pi.go",
+		"cursor/acp":                      "acpx.go",
+		"opencode/rovodev managed server": "server.go",
+	}
+	for adapter, path := range owners {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s owner %s: %v", adapter, path, err)
+		}
+		if !strings.Contains(string(data), ".Env = agentEnv(") {
+			t.Errorf("%s no longer propagates the gate marker through agentEnv (%s)", adapter, path)
+		}
+	}
+}
+
+// TestAgentEnv_StampsGateRoleMarker keeps the adapter chokepoint honest: the
+// source guard above only proves every adapter calls agentEnv, so agentEnv
+// itself must still carry the containment marker through to the subprocess.
+func TestAgentEnv_StampsGateRoleMarker(t *testing.T) {
+	resolved := resolveAgentEnv(agentEnv("/work/dir", map[string]string{"NM_HOME": "/isolated/home"}))
+	if resolved[GateRoleEnvVar] != "1" {
+		t.Errorf("%s = %q, want \"1\"", GateRoleEnvVar, resolved[GateRoleEnvVar])
+	}
+	if resolved["NM_HOME"] != "/isolated/home" {
+		t.Errorf("NM_HOME = %q, want \"/isolated/home\"", resolved["NM_HOME"])
+	}
+}
+
 func TestGitSafeEnv_GateMarkerWinsOverAmbient(t *testing.T) {
 	t.Setenv(GateRoleEnvVar, "0")
 	resolved := resolveAgentEnv(gitSafeEnv("/work/dir"))

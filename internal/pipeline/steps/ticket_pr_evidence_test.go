@@ -148,8 +148,12 @@ func TestTicketPrefix_AuthoredCommitSubjectsEndToEnd(t *testing.T) {
 		}
 
 		sctx := stepContextForBranch(tc.branch, tc.pattern)
+		reviewSubject, err := deterministicFixCommitMessage(sctx, types.StepReview, "tidy retry helper")
+		if err != nil {
+			t.Fatal(err)
+		}
 		subjects := []string{
-			deterministicFixCommitMessage(sctx, types.StepReview, "tidy retry helper"),
+			reviewSubject,
 			fixedFixCommitMessage(sctx, "apply agent fixes"),
 			fixedFixCommitMessage(sctx, "apply CI fixes"),
 		}

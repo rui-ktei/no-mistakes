@@ -120,7 +120,10 @@ func TestDeterministicFixCommitMessage(t *testing.T) {
 
 	t.Run("ticket leads subject with step trace", func(t *testing.T) {
 		t.Parallel()
-		got := deterministicFixCommitMessage(stepContextForBranch("WEB-12345-readme", `WEB-\d+`), types.StepDocument, "drop stale key")
+		got, err := deterministicFixCommitMessage(stepContextForBranch("WEB-12345-readme", `WEB-\d+`), types.StepDocument, "drop stale key")
+		if err != nil {
+			t.Fatal(err)
+		}
 		want := "WEB-12345: no-mistakes(document): drop stale key"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)
@@ -129,7 +132,10 @@ func TestDeterministicFixCommitMessage(t *testing.T) {
 
 	t.Run("no ticket keeps conventional subject", func(t *testing.T) {
 		t.Parallel()
-		got := deterministicFixCommitMessage(stepContextForBranch("docs/readme-refresh", `WEB-\d+`), types.StepDocument, "drop stale key")
+		got, err := deterministicFixCommitMessage(stepContextForBranch("docs/readme-refresh", `WEB-\d+`), types.StepDocument, "drop stale key")
+		if err != nil {
+			t.Fatal(err)
+		}
 		want := "no-mistakes(document): drop stale key"
 		if got != want {
 			t.Fatalf("got %q, want %q", got, want)

@@ -10,11 +10,15 @@ import (
 	"strings"
 
 	"github.com/kunchenguid/no-mistakes/internal/db"
+	"github.com/kunchenguid/no-mistakes/internal/gatecontext"
 	"github.com/kunchenguid/no-mistakes/internal/git"
 	"github.com/kunchenguid/no-mistakes/internal/paths"
+	"github.com/kunchenguid/no-mistakes/internal/safeurl"
 	"github.com/kunchenguid/no-mistakes/internal/scm"
 	"github.com/kunchenguid/no-mistakes/internal/scm/github"
 )
+
+var ensureGateHooksPathIsolation = git.EnsureHooksPathIsolation
 
 // RemoteName is the name of the git remote that points to the local gate.
 const RemoteName = "no-mistakes"
@@ -63,6 +67,11 @@ func InitWithFork(ctx context.Context, d *db.DB, p *paths.Paths, workDir, forkUR
 // an option is empty, the existing persisted value is preserved across
 // idempotent refreshes.
 func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir string, opts InitOptions) (*db.Repo, bool, error) {
+	if classified, err := (gatecontext.Inspector{DB: d, Paths: p}).Inspect(ctx, gatecontext.Request{CWD: workDir, MarkerPresent: gatecontext.MarkerPresent()}); err != nil {
+		return nil, false, err
+	} else if classified.Nested {
+		return nil, false, fmt.Errorf("%s", gatecontext.RefusalMessage(classified))
+	}
 	forkURL := strings.TrimSpace(opts.ForkURL)
 	baseBranch := strings.TrimSpace(opts.BaseBranch)
 
@@ -98,10 +107,23 @@ func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir stri
 	}
 	upstreamURL, err := getOriginURL(ctx, absRoot, "origin")
 	if err != nil {
+		// A missing "origin" is a normal state for a fresh `git init` repo, so
+		// give an actionable message instead of leaking git plumbing. Only
+		// substitute it when origin is genuinely absent; any other git failure
+		// keeps its original error.
+		hasOrigin, listErr := git.HasRemote(ctx, absRoot, "origin")
+		if listErr == nil && !hasOrigin {
+			return nil, false, fmt.Errorf(
+				"no 'origin' remote in %s\n\n"+
+					"no-mistakes pushes your branch and opens a pull request, so it needs a remote to push to.\n"+
+					"Add one, then re-run:\n\n"+
+					"  git remote add origin <url>",
+				absRoot)
+		}
 		return nil, false, fmt.Errorf("get origin url: %w", err)
 	}
 	if forkURL != "" {
-		if err := validateForkRouting(upstreamURL, forkURL); err != nil {
+		if err := validateForkRouting(ctx, upstreamURL, forkURL); err != nil {
 			return nil, false, err
 		}
 	}
@@ -110,6 +132,13 @@ func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir stri
 			return nil, false, err
 		}
 	}
+
+	// Redact embedded credentials for everything that is persisted, logged, or
+	// surfaced to the user. The bare gate keeps the full credentialled URL on
+	// its "origin" remote via provisionGate below so worktrees carved from it
+	// can still authenticate pushes; the push step resolves that credential
+	// from the worktree at run time instead of trusting the DB copy.
+	redactedUpstreamURL := safeurl.Redact(upstreamURL)
 
 	id := repoID(absRoot)
 	if existing != nil {
@@ -136,9 +165,9 @@ func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir stri
 	if existing != nil {
 		var repo *db.Repo
 		if forkURL != "" {
-			repo, err = d.UpdateRepoMetadataWithFork(existing.ID, upstreamURL, forkURL, branch)
+			repo, err = d.UpdateRepoMetadataWithFork(existing.ID, redactedUpstreamURL, forkURL, branch)
 		} else {
-			repo, err = d.UpdateRepoMetadata(existing.ID, upstreamURL, branch)
+			repo, err = d.UpdateRepoMetadata(existing.ID, redactedUpstreamURL, branch)
 		}
 		if err != nil {
 			return nil, false, fmt.Errorf("update repo metadata: %w", err)
@@ -154,7 +183,7 @@ func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir stri
 	}
 
 	// Insert repo record with deterministic ID.
-	repo, err := d.InsertRepoWithIDAndFork(id, absRoot, upstreamURL, forkURL, branch, baseBranch)
+	repo, err := d.InsertRepoWithIDAndFork(id, absRoot, redactedUpstreamURL, forkURL, branch, baseBranch)
 	if err != nil {
 		// Rollback: remove remote and bare repo.
 		git.RemoveRemote(ctx, absRoot, RemoteName)
@@ -162,7 +191,7 @@ func InitWithOptions(ctx context.Context, d *db.DB, p *paths.Paths, workDir stri
 		return nil, false, fmt.Errorf("insert repo: %w", err)
 	}
 
-	slog.Info("gate initialized", "repo_id", id, "path", absRoot, "upstream", upstreamURL)
+	slog.Info("gate initialized", "repo_id", id, "path", absRoot, "upstream", redactedUpstreamURL)
 	return repo, true, nil
 }
 
@@ -182,9 +211,9 @@ func validateBaseBranch(ctx context.Context, dir, baseBranch string) error {
 	return nil
 }
 
-func validateForkRouting(upstreamURL, forkURL string) error {
-	parentProvider := scm.DetectProvider(upstreamURL)
-	forkProvider := scm.DetectProvider(forkURL)
+func validateForkRouting(ctx context.Context, upstreamURL, forkURL string) error {
+	parentProvider := scm.DetectProviderContext(ctx, upstreamURL)
+	forkProvider := scm.DetectProviderContext(ctx, forkURL)
 	if parentProvider == scm.ProviderGitHub && forkProvider == scm.ProviderGitHub {
 		if github.RepoSlug(upstreamURL) == "" || github.RepoSlug(forkURL) == "" {
 			return fmt.Errorf("fork URL routing requires GitHub parent and fork remotes with owner/repo paths")
@@ -203,19 +232,25 @@ func provisionGate(ctx context.Context, bareDir, absRoot, upstreamURL, reposDir 
 	if err := git.InitBare(ctx, bareDir); err != nil {
 		return fmt.Errorf("create bare repo: %w", err)
 	}
-	if _, err := git.Run(ctx, bareDir, "config", "receive.advertisePushOptions", "true"); err != nil {
+	if _, err := git.RunBare(ctx, bareDir, "config", "receive.advertisePushOptions", "true"); err != nil {
 		return fmt.Errorf("enable push options: %w", err)
 	}
 
-	if _, err := git.RefreshManagedPostReceiveHook(bareDir); err != nil {
-		return fmt.Errorf("install hook: %w", err)
+	if err := git.RefreshManagedGateHooks(bareDir); err != nil {
+		return fmt.Errorf("install hooks: %w", err)
 	}
 
 	// Pin core.hookspath in the bare's per-worktree config so subprocess
 	// writes to shared local config (e.g. husky during pnpm install) can't
 	// disable the gate hook. See git.IsolateHooksPath for details.
-	if err := git.IsolateHooksPath(ctx, bareDir); err != nil {
+	isolated, err := ensureGateHooksPathIsolation(ctx, bareDir)
+	if err != nil {
 		return fmt.Errorf("isolate hooks path: %w", err)
+	}
+	if isolated {
+		if err := git.MarkGateConfigCurrent(bareDir); err != nil {
+			return fmt.Errorf("stamp gate config: %w", err)
+		}
 	}
 
 	// Record upstream as origin on the gate repo so gh can resolve repository
@@ -292,6 +327,11 @@ func reattachRelocatedRepo(ctx context.Context, d *db.DB, p *paths.Paths, absRoo
 // It removes the remote, deletes the bare repo and worktrees,
 // and deletes the repo record from the database.
 func Eject(ctx context.Context, d *db.DB, p *paths.Paths, workDir string) (*db.Repo, error) {
+	if classified, err := (gatecontext.Inspector{DB: d, Paths: p}).Inspect(ctx, gatecontext.Request{CWD: workDir, MarkerPresent: gatecontext.MarkerPresent()}); err != nil {
+		return nil, err
+	} else if classified.Nested {
+		return nil, fmt.Errorf("%s", gatecontext.RefusalMessage(classified))
+	}
 	// Normalize worktrees back to the main repo root so eject works no matter
 	// which checkout the user runs it from.
 	gitRoot, err := git.FindMainRepoRoot(workDir)

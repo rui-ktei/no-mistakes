@@ -79,24 +79,20 @@ Yolo and AXI `--yes` approve that fix review automatically after their one fix r
 
 ## Fix commits
 
-Each auto-fix cycle commits its changes with a descriptive message. The combined document-and-lint housekeeping pass runs in the Document step, so its documentation and safe lint fixes use the Document prefix; configured-command lint fixes use the Lint prefix:
+When the Review, Test, Document, or Lint step commits auto-fix changes, its subject comes from `commit.fix_message`.
+The [global config reference](/no-mistakes/reference/global-config/#commitfix_message) owns the template syntax, default, validation rules, size limits, and supported placeholders; the [repo config reference](/no-mistakes/reference/repo-config/#commitfix_message) owns the repository override and trust behavior.
+The pipeline validates the template, agent summary, predicted output size, and final rendered subject before `git add -A`, so a rejected value does not leave changes staged.
+The combined document-and-lint housekeeping pass runs in the Document step, so its documentation and safe lint fixes use the Document value for `{{.Step}}`; configured-command lint fixes use the Lint value.
 
 Before a step-specific fix commit, the pipeline verifies that the live worktree HEAD still descends from the head recorded after its previous commit.
 It allows a legitimate forward commit made by an agent, but aborts the run if an out-of-band backward or divergent reset would drop the reviewed history.
 
-| Step | Commit prefix |
-|---|---|
-| Rebase | `no-mistakes(rebase): <summary>` |
-| Review | `no-mistakes(review): <summary>` |
-| Test | `no-mistakes(test): <summary>` |
-| Document | `no-mistakes(document): <summary>` |
-| Lint | `no-mistakes(lint): <summary>` |
-
-The push step commits any remaining uncommitted changes with `no-mistakes: apply agent fixes`, and the CI step commits its CI fixes with `no-mistakes: apply CI fixes`.
+The template does not control commits created by the Rebase, CI, or Push steps.
+The CI step uses `no-mistakes: apply CI fixes`, and the Push step uses `no-mistakes: apply agent fixes` for remaining uncommitted changes.
 
 When `ticket_prefix_pattern` is configured, the gate resolves a work-item id by matching the pattern against, in order: the branch name, the PR title (when a PR exists), and the first non-gate author commit subject on the branch (oldest first).
-When an id is resolved from any source, it is prepended to the commit subject the gate would otherwise have written: step commits become `<ticket>: no-mistakes(<step>): <summary>`, the push commit becomes `<ticket>: no-mistakes: apply agent fixes`, and the CI fix commit becomes `<ticket>: no-mistakes: apply CI fixes`.
-When no source carries a match the gate keeps the `no-mistakes(<step>): ...` form above, so ticket-less changes are unaffected.
+When an id is resolved from any source, it is prepended to the commit subject the gate would otherwise have written: step commits become `<ticket>: <rendered commit.fix_message>`, the push commit becomes `<ticket>: no-mistakes: apply agent fixes`, and the CI fix commit becomes `<ticket>: no-mistakes: apply CI fixes`.
+When no source carries a match the gate keeps the unprefixed subject, so ticket-less changes are unaffected.
 
 ## Step rounds
 

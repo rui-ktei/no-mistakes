@@ -11,6 +11,7 @@ import (
 
 	toon "github.com/toon-format/toon-go"
 
+	"github.com/kunchenguid/no-mistakes/internal/branchsync"
 	"github.com/kunchenguid/no-mistakes/internal/cimonitor"
 	"github.com/kunchenguid/no-mistakes/internal/daemon"
 	"github.com/kunchenguid/no-mistakes/internal/gate"
@@ -22,14 +23,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// drivePollInterval is how often the drive loop re-reads run state. Short
-// enough to feel responsive to an agent, long enough to avoid hammering the
-// daemon during long agent steps.
-const drivePollInterval = 250 * time.Millisecond
-
 // triggerWaitTimeout bounds how long we wait for the daemon to register a run
 // after pushing to the gate before falling back to a rerun.
 const triggerWaitTimeout = 5 * time.Second
+
+// abortStateWaitTimeout bounds the post-cancel wait for the executor to
+// persist its terminal state before AXI renders refreshed custody guidance.
+const abortStateWaitTimeout = 10 * time.Second
 
 // terminalStatus reports whether a run has reached a final state.
 func terminalStatus(status string) bool {
@@ -73,8 +73,9 @@ func newAxiRunCmd() *cobra.Command {
 			"to accomplish (the goal behind the change, not a description of the diff)\n" +
 			"so no-mistakes uses it directly instead of inferring it from transcripts.\n\n" +
 			"The calling agent drives AXI approval gates but does not become the pipeline\n" +
-			"agent. The daemon requires a supported native agent binary or a configured\n" +
-			"ACP target through acpx, and fails before the first step when none can run.\n\n" +
+			"agent. The daemon requires a supported native agent binary, the `agent: cursor`\n" +
+			"ACP alias, or an explicit `acp:<target>` through `acpx`, and fails before the\n" +
+			"first step when none can run.\n\n" +
 			preserveGateFixCommitsGuidance,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -146,11 +147,14 @@ func runAxiRun(cmd *cobra.Command, autoYes bool, skipSteps []types.StepName, int
 		var err error
 		runID, err = triggerRun(ctx, env, branch, headSHA, skipSteps, intent, baseBranch)
 		if err != nil {
+			if ownershipErr, ok := err.(*branchOwnershipError); ok {
+				return emitBranchOwnershipError(cmd, ownershipErr)
+			}
 			return emitError(cmd, 1, err.Error())
 		}
 	}
 
-	run, ciReady, err := driveRun(ctx, cmd.ErrOrStderr(), env.client, runID, autoYes, ciLogReader(env.p))
+	run, ciReady, err := driveRun(ctx, cmd.ErrOrStderr(), env.client, env.p.Socket(), runID, autoYes, ciLogReader(env.p))
 	if err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("drive run: %v", err))
 	}
@@ -182,7 +186,11 @@ func activeRunIDForHead(active *ipc.GetActiveRunResult, headSHA string) string {
 }
 
 func activeRunInfoForHead(run *ipc.RunInfo, headSHA string) *ipc.RunInfo {
-	if run == nil || terminalStatus(string(run.Status)) || run.HeadSHA != headSHA {
+	if run == nil || terminalStatus(string(run.Status)) {
+		return nil
+	}
+	matchesSubmitted := run.SubmittedHeadSHA != nil && *run.SubmittedHeadSHA == headSHA
+	if run.HeadSHA != headSHA && !matchesSubmitted {
 		return nil
 	}
 	return run
@@ -217,6 +225,57 @@ func preflightGuard(ctx context.Context, env *axiEnv, branch string) func(*cobra
 	return nil
 }
 
+// branchOwnershipError carries the shared branch-sync classification that
+// blocked a fresh trigger. Keeping the state intact lets AXI render the exact
+// structured next action instead of reducing the refusal to a Git push error.
+type branchOwnershipError struct {
+	state branchsync.State
+}
+
+func (e *branchOwnershipError) Error() string {
+	if e.state.Error != "" {
+		return e.state.Error
+	}
+	return "the pipeline still owns this branch; no fresh run was started"
+}
+
+func emitBranchOwnershipError(cmd *cobra.Command, ownershipErr *branchOwnershipError) error {
+	state := ownershipErr.state
+	fields := []toon.Field{
+		{Key: "error", Value: ownershipErr.Error()},
+		branchSyncField(state),
+	}
+	if state.NextAction != nil {
+		fields = append(fields, toon.Field{Key: "help", Value: []string{
+			"Run `" + state.NextAction.Command + "`",
+			branchSyncAgentGuidance,
+		}})
+	}
+	emitDoc(cmd, fields...)
+	return &exitError{code: 1}
+}
+
+func inspectAxiBranchSync(ctx context.Context, env *axiEnv) branchsync.State {
+	service := &branchsync.Service{
+		DB:      env.d,
+		Repo:    env.repo,
+		WorkDir: ".",
+		GateDir: env.p.RepoDir(env.repo.ID),
+		Paths:   env.p,
+	}
+	return service.InspectCached(ctx)
+}
+
+func freshRunBranchOwnershipState(ctx context.Context, env *axiEnv) *branchsync.State {
+	state := inspectAxiBranchSync(ctx, env)
+	switch state.State {
+	case branchsync.StatePipelineOwned, branchsync.StatePushInProgress:
+		return &state
+	default:
+		return nil
+	}
+}
+
 // triggerRun starts a fresh run for branch: it pushes the current HEAD through
 // the gate to trigger a pipeline, and falls back to a rerun when the push was a
 // no-op (the gate already had this commit). Callers must check for an existing
@@ -235,7 +294,18 @@ func triggerRun(ctx context.Context, env *axiEnv, branch, headSHA string, skipSt
 		// a matching terminal run may predate this push, so do not attach to it.
 		priorRunIDs = nil
 	}
+	if state := freshRunBranchOwnershipState(ctx, env); state != nil {
+		return "", &branchOwnershipError{state: *state}
+	}
 	pushErr := git.PushWithOptions(ctx, ".", gate.RemoteName, "refs/heads/"+branch, "", false, pushOptions)
+	if pushErr != nil {
+		// Close the inspection-to-push race: if the pipeline advanced ownership
+		// after the pre-push check, preserve the structured branch-sync refusal
+		// instead of leaking the resulting Git non-fast-forward.
+		if state := freshRunBranchOwnershipState(ctx, env); state != nil {
+			return "", &branchOwnershipError{state: *state}
+		}
+	}
 
 	if run, _ := waitForTriggeredRunForHead(ctx, env.client, env.repo.ID, branch, headSHA, priorRunIDs, triggerWaitTimeout); run != nil {
 		return run.ID, nil
@@ -335,8 +405,9 @@ func rerunParams(repoID, branch string, skipSteps []types.StepName, intent, base
 	return &ipc.RerunParams{RepoID: repoID, Branch: branch, SkipSteps: skipSteps, Intent: intent, BaseBranch: baseBranch}
 }
 
-// driveRun polls a run until it reaches an approval gate, a terminal state, or
-// CI checks pass, streaming step transitions to progress (stderr). When
+// driveRun subscribes to a run and reconciles authoritative state on transition
+// events until it reaches an approval gate, a terminal state, or CI checks
+// pass, streaming step transitions to progress (stderr). When
 // autoApprove is set it resolves each gate and continues; otherwise it returns
 // at the first gate so the caller can surface it for a human/agent decision.
 //
@@ -353,14 +424,18 @@ func rerunParams(repoID, branch string, skipSteps []types.StepName, intent, base
 // ready for a human to merge. The daemon keeps monitoring in the background.
 // readCILog reads the CI step's log lines for runID; it may be nil (no early
 // stop) and returns nil when no log exists yet.
-func driveRun(ctx context.Context, progress io.Writer, client *ipc.Client, runID string, autoApprove bool, readCILog func(string) []string) (run *ipc.RunInfo, ciReady bool, err error) {
+func driveRun(ctx context.Context, progress io.Writer, client *ipc.Client, socketPath, runID string, autoApprove bool, readCILog func(string) []string) (run *ipc.RunInfo, ciReady bool, err error) {
+	reconciler := newRunReconciler(&ipcRunStateSource{socketPath: socketPath}, runID)
+	defer reconciler.Close()
+	return driveRunWithReconciler(ctx, progress, client, reconciler, runID, autoApprove, readCILog)
+}
+
+func driveRunWithReconciler(ctx context.Context, progress io.Writer, client *ipc.Client, reconciler *runReconciler, runID string, autoApprove bool, readCILog func(string) []string) (run *ipc.RunInfo, ciReady bool, err error) {
 	pp := &progressPrinter{w: progress, seen: map[string]string{}}
 	fixedSteps := map[string]bool{}
+	pendingGate := ""
 	for {
-		if err := ctx.Err(); err != nil {
-			return nil, false, err
-		}
-		run, err := getRunInfo(client, runID)
+		run, err := reconciler.Next(ctx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -377,6 +452,13 @@ func driveRun(ctx context.Context, progress io.Writer, client *ipc.Client, runID
 			if !autoApprove {
 				return run, false, nil
 			}
+			gateKey := gate.Name + "\x00" + gate.Status
+			if pendingGate == gateKey {
+				// Duplicate or delayed events can race persistence after a response.
+				// Keep waiting for an authoritative transition rather than answering
+				// the same gate twice.
+				continue
+			}
 			action, findingIDs := gateResolution(gate, fixedSteps[gate.Name])
 			if action == types.ActionFix {
 				fixedSteps[gate.Name] = true
@@ -384,19 +466,15 @@ func driveRun(ctx context.Context, progress io.Writer, client *ipc.Client, runID
 			if err := sendRespond(client, runID, types.StepName(gate.Name), action, findingIDs, nil, nil); err != nil {
 				return nil, false, fmt.Errorf("auto-resolve %s: %w", gate.Name, err)
 			}
-			if err := waitStepLeavesGate(ctx, client, runID, gate.Name, gate.Status); err != nil {
-				return nil, false, err
-			}
+			pendingGate = gateKey
 			continue
 		}
+		pendingGate = ""
 		// CI is green but the PR is unmerged: hand control back rather than
 		// waiting on a human merge. This holds even under autoApprove, since
 		// the agent cannot approve away a human's merge.
 		if readCILog != nil && ciReadyToMerge(rv, readCILog(runID)) {
 			return run, true, nil
-		}
-		if err := sleepCtx(ctx, drivePollInterval); err != nil {
-			return nil, false, err
 		}
 	}
 }
@@ -456,13 +534,12 @@ func gateResolution(gate stepView, alreadyFixed bool) (types.ApprovalAction, []s
 // waitStepLeavesGate blocks until the named step's status changes away from the
 // gate status we just answered, or the run terminates. This prevents a
 // double-approve race: respond is asynchronous, so without waiting the next
-// poll could still observe the same gate and approve it twice.
-func waitStepLeavesGate(ctx context.Context, client *ipc.Client, runID, step, gateStatus string) error {
+// event reconciliation could still observe the same gate and approve it twice.
+func waitStepLeavesGate(ctx context.Context, socketPath, runID, step, gateStatus string) error {
+	reconciler := newRunReconciler(&ipcRunStateSource{socketPath: socketPath}, runID)
+	defer reconciler.Close()
 	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		run, err := getRunInfo(client, runID)
+		run, err := reconciler.Next(ctx)
 		if err != nil {
 			return err
 		}
@@ -476,9 +553,6 @@ func waitStepLeavesGate(ctx context.Context, client *ipc.Client, runID, step, ga
 				}
 				break
 			}
-		}
-		if err := sleepCtx(ctx, drivePollInterval); err != nil {
-			return err
 		}
 	}
 }
@@ -511,17 +585,6 @@ func sendRespond(client *ipc.Client, runID string, step types.StepName, action t
 	return nil
 }
 
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
-
 // renderDriveResult prints the run snapshot plus one of: the active gate (exit
 // 0, a normal decision point), a checks-passed outcome (exit 0, CI is green and
 // the PR is ready for a human to merge), or the terminal outcome (exit 0 when
@@ -531,6 +594,11 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error {
 	rv := runViewFromIPC(run)
 	fields := []toon.Field{runObjectField(rv)}
+	hasBranchSync := false
+	if syncField := cachedBranchSyncField(cmd, run.ID); syncField != nil {
+		fields = append(fields, *syncField)
+		hasBranchSync = true
+	}
 
 	// CI passed but the run is intentionally still monitoring for a human
 	// merge. Report it as a distinct, successful outcome so the agent stops
@@ -544,6 +612,9 @@ func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error
 		fixes := rv.fixRows()
 		fields = appendFixesField(fields, fixes)
 		help := append([]string{merge}, successReportHelp(fixes)...)
+		if hasBranchSync {
+			help = append(help, branchSyncAgentGuidance)
+		}
 		help = append(help, staleMonitorGuidance)
 		fields = append(fields, toon.Field{Key: "help", Value: help})
 		emitDoc(cmd, fields...)
@@ -569,12 +640,18 @@ func renderDriveResult(cmd *cobra.Command, run *ipc.RunInfo, ciReady bool) error
 			help = append(help, fmt.Sprintf("Open the PR: %s", rv.PRURL))
 		}
 		help = append(help, successReportHelp(fixes)...)
+		if hasBranchSync {
+			help = append(help, branchSyncAgentGuidance)
+		}
 		fields = append(fields, toon.Field{Key: "help", Value: help})
 		emitDoc(cmd, fields...)
 		return nil
 	}
 
 	help := []string{preserveGateFixCommitsGuidance}
+	if hasBranchSync {
+		help = append(help, branchSyncAgentGuidance)
+	}
 	if rv.PRURL != "" {
 		help = append([]string{fmt.Sprintf("Open the PR: %s", rv.PRURL)}, help...)
 	}
@@ -731,11 +808,11 @@ func runAxiRespond(cmd *cobra.Command, ra respondArgs) error {
 
 	// Let the executor consume the response before we re-read state, so we
 	// don't immediately observe the same gate we just answered.
-	if err := waitStepLeavesGate(ctx, env.client, runID, string(stepName), gateStatusFor(rv, string(stepName))); err != nil {
+	if err := waitStepLeavesGate(ctx, env.p.Socket(), runID, string(stepName), gateStatusFor(rv, string(stepName))); err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("wait for %s: %v", stepName, err))
 	}
 
-	final, ciReady, err := driveRun(ctx, cmd.ErrOrStderr(), env.client, runID, ra.autoYes, ciLogReader(env.p))
+	final, ciReady, err := driveRun(ctx, cmd.ErrOrStderr(), env.client, env.p.Socket(), runID, ra.autoYes, ciLogReader(env.p))
 	if err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("drive run: %v", err))
 	}
@@ -815,12 +892,53 @@ func runAxiAbort(cmd *cobra.Command, runID string) error {
 	if err := env.client.Call(ipc.MethodCancelRun, &ipc.CancelRunParams{RunID: active.Run.ID}, &result); err != nil {
 		return emitError(cmd, 1, fmt.Sprintf("abort run: %v", err))
 	}
-	emitDoc(cmd,
+	waitForTerminalRun(ctx, env.client, active.Run.ID, abortStateWaitTimeout)
+	fields := []toon.Field{
 		toon.Field{Key: "aborted", Value: true},
 		toon.Field{Key: "run", Value: active.Run.ID},
 		toon.Field{Key: "branch", Value: active.Run.Branch},
+	}
+	state := inspectAxiBranchSync(ctx, env)
+	if state.Pipeline.RunID == active.Run.ID && relevantCachedSyncState(state) {
+		fields = append(fields, branchSyncField(state))
+	}
+	help := []string{
+		"Run `no-mistakes axi sync --check` before any local follow-up commit - a cancelled run can leave unpublished pipeline commits preserved in the local gate, and the check offers the guarded custody recovery",
+	}
+	if state.Pipeline.RunID == active.Run.ID && state.NextAction != nil {
+		help = []string{
+			"Run `" + state.NextAction.Command + "`",
+			branchSyncAgentGuidance,
+		}
+	}
+	fields = append(fields,
+		toon.Field{Key: "help", Value: help},
 	)
+	emitDoc(cmd, fields...)
 	return nil
+}
+
+func waitForTerminalRun(ctx context.Context, client *ipc.Client, runID string, timeout time.Duration) *ipc.RunInfo {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		run, err := getRunInfo(client, runID)
+		if err != nil {
+			return nil
+		}
+		if run != nil && terminalStatus(string(run.Status)) {
+			return run
+		}
+		select {
+		case <-ctx.Done():
+			return run
+		case <-timer.C:
+			return run
+		case <-ticker.C:
+		}
+	}
 }
 
 // runAxiAbortByRunID cancels a run by its id directly via the daemon, without
