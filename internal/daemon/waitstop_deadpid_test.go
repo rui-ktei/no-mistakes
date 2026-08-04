@@ -72,7 +72,7 @@ func TestWaitForDaemonStop_TreatsDeadRecordedPIDAsStopped(t *testing.T) {
 		return nil
 	}
 
-	if err := waitForDaemonStop(p); err != nil {
+	if err := waitForDaemonStop(p, captureRunningDaemon(p)); err != nil {
 		t.Fatalf("waitForDaemonStop() = %v, want nil for an already-dead daemon", err)
 	}
 	if _, err := os.Stat(p.PIDFile()); !os.IsNotExist(err) {
@@ -102,7 +102,7 @@ func TestWaitForDaemonStop_DoesNotWaitOutDeadlineForDeadPID(t *testing.T) {
 	daemonProcessRunning = func(int) (bool, error) { return false, nil }
 
 	start := time.Now()
-	if err := waitForDaemonStop(p); err != nil {
+	if err := waitForDaemonStop(p, captureRunningDaemon(p)); err != nil {
 		t.Fatalf("waitForDaemonStop() = %v, want nil", err)
 	}
 	if elapsed := time.Since(start); elapsed > daemonStopTimeout()/2 {
@@ -150,7 +150,7 @@ func TestWaitForDaemonStop_StillKillsLiveUnresponsiveDaemon(t *testing.T) {
 		return nil
 	}
 
-	if err := waitForDaemonStop(p); err != nil {
+	if err := waitForDaemonStop(p, captureRunningDaemon(p)); err != nil {
 		t.Fatalf("waitForDaemonStop() = %v, want nil after killing the daemon", err)
 	}
 	if !killed {
