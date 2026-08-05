@@ -1,12 +1,13 @@
 ---
 name: install-no-mistakes
-description: Install the no-mistakes CLI ("nom") locally from this cloned repo - ensures a recent Go toolchain is present, then builds and installs the binary via `make install`. Use when a dev asks to install no-mistakes/nom, set up the no-mistakes CLI locally, or get this repo's tool working on their machine.
+description: Install the no-mistakes CLI ("nom") locally from this cloned repo - ensures a recent Go toolchain is present, builds and installs the binary via `make install`, and sets the org-wide ticket_prefix_pattern config convention. Use when a dev asks to install no-mistakes/nom, set up the no-mistakes CLI locally, or get this repo's tool working on their machine.
 ---
 
 # Install no-mistakes (nom)
 
-This repo builds a single Go binary. Installing it locally is two steps: make sure a
-recent Go is present, then run `make install` from the repo root.
+This repo builds a single Go binary. Installing it locally takes three steps: make
+sure a recent Go is present, run `make install` from the repo root, then set the
+org's ticket-prefix convention in the global config.
 
 ## 1. Check Go
 
@@ -53,7 +54,29 @@ binary - no separate daemon step needed.
 Confirm `$(go env GOPATH)/bin` (usually `~/go/bin`) is on `PATH` so the bare
 `no-mistakes`/`nom` commands resolve afterward.
 
-## 3. Verify
+## 3. Set the ticket-prefix convention
+
+Restarting the daemon (the last thing `make install` does) materializes the global
+config file at `$NM_HOME/config.yaml` (default `~/.no-mistakes/config.yaml`) if it
+doesn't exist yet, pre-populated with a commented-out example:
+
+```yaml
+# ticket_prefix_pattern: 'WEB-\d+'
+```
+
+Uncomment it (or add the line if it's somehow missing) so it reads:
+
+```yaml
+ticket_prefix_pattern: 'WEB-\d+'
+```
+
+This makes every gated repo extract a `WEB-12345`-style ticket id from the branch
+name (falling back to the PR title, then the oldest authored commit subject) and
+prepend it to PR titles and gate-authored commit subjects, instead of plain
+conventional-commit formatting. A repo can still override this locally by setting
+its own non-empty `ticket_prefix_pattern` in its `.no-mistakes.yaml`.
+
+## 4. Verify
 
 ```sh
 no-mistakes --version
