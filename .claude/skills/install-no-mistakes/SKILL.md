@@ -1,9 +1,9 @@
 ---
-name: sympli-install-nom
-description: Install the no-mistakes CLI ("nom") locally for a Sympli dev from this cloned repo - ensures a recent Go toolchain is present, then builds and installs the binary via `make install`. Use when a Sympli dev asks to install no-mistakes/nom, set up the no-mistakes CLI locally, or get this repo's tool working on their machine.
+name: install-no-mistakes
+description: Install the no-mistakes CLI ("nom") locally from this cloned repo - ensures a recent Go toolchain is present, then builds and installs the binary via `make install`. Use when a dev asks to install no-mistakes/nom, set up the no-mistakes CLI locally, or get this repo's tool working on their machine.
 ---
 
-# Install no-mistakes (nom) for Sympli devs
+# Install no-mistakes (nom)
 
 This repo builds a single Go binary. Installing it locally is two steps: make sure a
 recent Go is present, then run `make install` from the repo root.
@@ -19,8 +19,7 @@ go version
 is genuinely the only toolchain prerequisite.
 
 If `go` is missing, or its version is older than `go.mod` requires, install the latest
-Go without sudo (mirrors how Go is already set up in the Sympli devcontainer, at
-`~/.local/go` with a symlink in `~/.local/bin`):
+Go without sudo, into a user-writable location:
 
 ```sh
 GOVER=$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)
