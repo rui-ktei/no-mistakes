@@ -72,6 +72,8 @@ curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/i
 
 Windows, Go install, and build-from-source instructions are in the [installation guide](https://kunchenguid.github.io/no-mistakes/start-here/installation/).
 
+Already have this repo cloned and use a skill-aware coding agent (Claude Code, etc.)? Invoke the checked-in [`install-no-mistakes`](.claude/skills/install-no-mistakes/SKILL.md) skill to install it for you.
+
 ## Quick Start
 
 ```sh

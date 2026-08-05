@@ -72,6 +72,8 @@ curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/i
 
 Windows、Go install 以及从源码构建的说明，见[安装指南](https://kunchenguid.github.io/no-mistakes/start-here/installation/)。
 
+已经克隆了这个仓库，并且用的是支持 skill 的编码 agent(比如 Claude Code)?调用仓库内置的 [`install-no-mistakes`](.claude/skills/install-no-mistakes/SKILL.md) skill，让它帮你安装。
+
 ## 快速上手
 
 ```sh
