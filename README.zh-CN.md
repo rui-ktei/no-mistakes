@@ -66,13 +66,17 @@
 
 ## 安装
 
+两种安装方式，都是从源码构建：
+
+**通过 AI** —— 已经克隆了这个仓库，并且用的是支持 skill 的编码 agent(比如 Claude Code)?调用仓库内置的 [`install-no-mistakes`](.claude/skills/install-no-mistakes/SKILL.md) skill，让它帮你安装。
+
+**通过 shell**
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/scripts/install.sh | sh
 ```
 
-Windows、Go install 以及从源码构建的说明，见[安装指南](https://kunchenguid.github.io/no-mistakes/start-here/installation/)。
-
-已经克隆了这个仓库，并且用的是支持 skill 的编码 agent(比如 Claude Code)?调用仓库内置的 [`install-no-mistakes`](.claude/skills/install-no-mistakes/SKILL.md) skill，让它帮你安装。
+克隆仓库、确保有可用的 Go 工具链、用 `make install` 构建并安装，然后应用 `ticket_prefix_pattern` 约定 —— 和这个 skill 做的事情一样。
 
 ## 快速上手
 
