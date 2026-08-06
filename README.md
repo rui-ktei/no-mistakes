@@ -66,17 +66,7 @@ Nothing reaches the configured push target until every check is green.
 
 ## Install
 
-Two ways to install, both from source:
-
 **Via AI** - already have this repo cloned and use a skill-aware coding agent (Claude Code, etc.)? Invoke the checked-in [`install-no-mistakes`](.claude/skills/install-no-mistakes/SKILL.md) skill to install it for you.
-
-**Via shell**
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/scripts/install.sh | sh
-```
-
-Clones the repo, ensures a recent Go toolchain, builds and installs with `make install`, and applies the `ticket_prefix_pattern` convention - the same steps the skill performs.
 
 ## Quick Start
 
